@@ -6,9 +6,11 @@ a single Alpaca paper account. All trades go through Alpaca for real
 execution, but budget enforcement and P&L tracking happen here.
 
 Google Sheet tabs:
-  - "trades"      : timestamp, strategy_id, symbol, side, qty, price, order_id
-  - "strategies"  : strategy_id, display_name, initial_cash, created_at
-  - "heartbeats"  : strategy_id, last_seen, status
+  - "trades"      : last 5 trades per strategy (rolling window)
+  - "state"       : current cash, position per strategy (source of truth)
+  - "strategies"  : strategy registry
+  - "heartbeats"  : online/offline status
+  - "performance" : equity & P&L for dashboard
 """
 
 import time
@@ -20,6 +22,8 @@ from alpaca.trading.enums import OrderSide, TimeInForce
 from config import get_gsheet, get_logger
 
 logger = get_logger("portfolio")
+
+MAX_TRADES_PER_STRATEGY = 5
 
 
 class PortfolioTracker:
@@ -34,10 +38,10 @@ class PortfolioTracker:
         self.sheet = get_gsheet()
         self._register_strategy()
 
-        # Build in-memory state from existing trades
+        # Load state from the "state" tab (not by replaying trades)
         self._cash = initial_cash
         self._position = {"qty": 0.0, "avg_entry_price": 0.0}
-        self._rebuild_state()
+        self._load_state()
 
         logger.info(
             f"[{strategy_id}] Initialized — cash=${self._cash:.2f}, "
@@ -56,33 +60,40 @@ class PortfolioTracker:
                 datetime.now(timezone.utc).isoformat(),
             ])
 
-    def _rebuild_state(self):
-        """Read all trades from the sheet and rebuild cash + position in memory."""
-        ws = self.sheet.worksheet("trades")
-        records = ws.get_all_records()
-        my_trades = [r for r in records if r["strategy_id"] == self.strategy_id]
+    def _load_state(self):
+        """Load current cash and position from the state tab."""
+        try:
+            ws = self.sheet.worksheet("state")
+            records = ws.get_all_records()
+            for r in records:
+                if r["strategy_id"] == self.strategy_id:
+                    self._cash = float(r["cash"])
+                    self._position["qty"] = float(r["btc_qty"])
+                    self._position["avg_entry_price"] = float(r["avg_entry_price"])
+                    return
+        except Exception as e:
+            logger.warning(f"Could not load state: {e}")
+        # No saved state found — keep defaults (initial_cash, no position)
 
-        self._cash = self.initial_cash
-        self._position = {"qty": 0.0, "avg_entry_price": 0.0}
-
-        for t in my_trades:
-            qty = float(t["qty"])
-            price = float(t["price"])
-
-            if t["side"] == "BUY":
-                self._cash -= qty * price
-                old_qty = self._position["qty"]
-                old_avg = self._position["avg_entry_price"]
-                new_qty = old_qty + qty
-                self._position["avg_entry_price"] = (
-                    ((old_qty * old_avg) + (qty * price)) / new_qty if new_qty > 0 else 0
-                )
-                self._position["qty"] = new_qty
-            elif t["side"] == "SELL":
-                self._cash += qty * price
-                self._position["qty"] = max(self._position["qty"] - qty, 0)
-                if self._position["qty"] == 0:
-                    self._position["avg_entry_price"] = 0
+    def _save_state(self):
+        """Persist current cash and position to the state tab."""
+        row = [
+            self.strategy_id,
+            round(self._cash, 6),
+            round(self._position["qty"], 8),
+            round(self._position["avg_entry_price"], 2),
+        ]
+        try:
+            ws = self.sheet.worksheet("state")
+            records = ws.get_all_records()
+            for i, r in enumerate(records):
+                if r["strategy_id"] == self.strategy_id:
+                    ws.update(f"A{i+2}:D{i+2}", [row])
+                    return
+            # Not found — add new row
+            ws.append_row(row)
+        except Exception as e:
+            logger.error(f"Failed to save state: {e}")
 
     def get_cash_balance(self) -> float:
         return self._cash
@@ -117,8 +128,9 @@ class PortfolioTracker:
         self._position["qty"] = new_qty
         self._cash -= fill_qty * fill_price
 
-        # Log to Google Sheet
+        # Persist to Google Sheet
         self._append_trade(symbol, "BUY", fill_qty, fill_price, str(order.id))
+        self._save_state()
         logger.info(f"[{self.strategy_id}] BOUGHT {fill_qty:.8f} {symbol} @ ${fill_price:,.2f}")
 
         return {"qty": fill_qty, "price": fill_price, "order_id": str(order.id)}
@@ -143,8 +155,9 @@ class PortfolioTracker:
             self._position["avg_entry_price"] = 0
         self._cash += fill_qty * fill_price
 
-        # Log to Google Sheet
+        # Persist to Google Sheet
         self._append_trade(symbol, "SELL", fill_qty, fill_price, str(order.id))
+        self._save_state()
         logger.info(f"[{self.strategy_id}] SOLD {fill_qty:.8f} {symbol} @ ${fill_price:,.2f}")
 
         return {"qty": fill_qty, "price": fill_price, "order_id": str(order.id)}
@@ -181,10 +194,9 @@ class PortfolioTracker:
             records = ws.get_all_records()
             for i, r in enumerate(records):
                 if r["strategy_id"] == self.strategy_id:
-                    ws.update_cell(i + 2, 2, now)  # +2: header + 0-index
+                    ws.update_cell(i + 2, 2, now)
                     ws.update_cell(i + 2, 3, "running")
                     return
-            # Not found — add new row
             ws.append_row([self.strategy_id, now, "running"])
         except Exception as e:
             logger.warning(f"Heartbeat update failed: {e}")
@@ -212,7 +224,6 @@ class PortfolioTracker:
                 if r["strategy_id"] == self.strategy_id:
                     ws.update(f"A{i+2}:H{i+2}", [row])
                     return
-            # Not found — add new row
             ws.append_row(row)
         except Exception as e:
             logger.warning(f"Performance update failed: {e}")
@@ -229,10 +240,22 @@ class PortfolioTracker:
         raise TimeoutError(f"Order {order_id} not filled after {max_attempts}s")
 
     def _append_trade(self, symbol: str, side: str, qty: float, price: float, order_id: str):
-        """Append a trade row to the Google Sheet."""
+        """Append a trade and keep only the last 5 per strategy."""
         now = datetime.now(timezone.utc).isoformat()
         try:
             ws = self.sheet.worksheet("trades")
             ws.append_row([now, self.strategy_id, symbol, side, qty, price, order_id])
+
+            # Trim: keep only last MAX_TRADES_PER_STRATEGY for this strategy
+            records = ws.get_all_records()
+            my_rows = [
+                (i + 2, r) for i, r in enumerate(records)
+                if r["strategy_id"] == self.strategy_id
+            ]
+            if len(my_rows) > MAX_TRADES_PER_STRATEGY:
+                rows_to_delete = [row_num for row_num, _ in my_rows[:-MAX_TRADES_PER_STRATEGY]]
+                # Delete from bottom up to avoid row shift issues
+                for row_num in sorted(rows_to_delete, reverse=True):
+                    ws.delete_rows(row_num)
         except Exception as e:
             logger.error(f"Failed to log trade to sheet: {e}")
