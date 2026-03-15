@@ -106,14 +106,15 @@ for i, (strategy_id, info) in enumerate(STRATEGIES.items()):
                 delta_color="normal",
             )
 
-            # Compact recent trades
-            my_trades = [t for t in trades if t["strategy_id"] == strategy_id]
+            # Compact recent trades (last 5 only)
+            my_trades = sorted(
+                [t for t in trades if t["strategy_id"] == strategy_id],
+                key=lambda x: x["timestamp"], reverse=True,
+            )[:5]
             if my_trades:
                 st.caption("Recent trades:")
-                for t in sorted(my_trades, key=lambda x: x["timestamp"], reverse=True):
-                    side = t["side"]
-                    price = float(t["price"])
-                    st.text(f"  {side} @ ${price:,.2f}")
+                for t in my_trades:
+                    st.text(f"  {t['side']} @ ${float(t['price']):,.2f}")
 
             st.caption(f"Updated: {str(perf['last_updated'])[:16]} UTC")
         else:
