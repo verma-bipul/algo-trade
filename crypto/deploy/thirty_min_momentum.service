@@ -1,0 +1,17 @@
+[Unit]
+Description=Crypto 30-Minute Momentum Strategy
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=pi
+WorkingDirectory=/home/pi/algo-trade/crypto
+ExecStart=/home/pi/algo-trade/crypto/.venv/bin/python thirty_min_momentum.py
+Restart=on-failure
+RestartSec=30
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

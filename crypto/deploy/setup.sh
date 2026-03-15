@@ -9,7 +9,7 @@ set -euo pipefail
 REPO_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 VENV_DIR="$REPO_DIR/.venv"
 CURRENT_USER="$(whoami)"
-SERVICES=("buy_and_hold" "minute_momentum")
+SERVICES=("buy_and_hold" "minute_momentum" "five_min_momentum" "thirty_min_momentum")
 
 echo "=== Crypto Trader Pi Setup ==="
 echo "Directory: $REPO_DIR"
@@ -82,7 +82,8 @@ echo ""
 echo "=== Setup Complete ==="
 echo ""
 echo "View logs:"
-echo "  journalctl -u buy_and_hold -f"
-echo "  journalctl -u minute_momentum -f"
+for svc in "${SERVICES[@]}"; do
+    echo "  journalctl -u ${svc} -f"
+done
 echo ""
 echo "Dashboard: deploy separately on Streamlit Cloud (see README)"

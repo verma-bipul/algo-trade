@@ -1,7 +1,7 @@
 """
 Streamlit dashboard for monitoring crypto trading strategies.
 
-Reads performance data from Google Sheets.
+Reads performance + trade data from Google Sheets.
 Deploy on Streamlit Cloud — NOT on the Pi.
 
 To add a new strategy: just add an entry to the STRATEGIES dict below.
@@ -24,24 +24,20 @@ load_dotenv()
 STRATEGIES = {
     "buy_and_hold": {
         "name": "Buy & Hold",
-        "description": (
-            "Buy $100 of BTC on day one, hold forever. "
-            "This is the benchmark — can any active strategy beat simply holding?"
-        ),
+        "description": "Buy $100 of BTC on day one, hold forever. Benchmark.",
     },
     "minute_momentum": {
         "name": "1-Min Momentum",
-        "description": (
-            "Every minute, check the last completed candle. "
-            "Green candle (close > open) → buy BTC with all available cash. "
-            "Hold for 1 minute, then sell. Red candle → skip. Repeat 24/7."
-        ),
+        "description": "Green 1-min candle → buy, hold 1 min, sell. Red → skip.",
     },
-    # Example — adding a future strategy:
-    # "mean_reversion": {
-    #     "name": "Mean Reversion",
-    #     "description": "Buy when BTC drops 2% below its 1-hour moving average, sell when it reverts.",
-    # },
+    "five_min_momentum": {
+        "name": "5-Min Momentum",
+        "description": "Green 5-min candle → buy, hold 5 min, sell. Red → skip.",
+    },
+    "thirty_min_momentum": {
+        "name": "30-Min Momentum",
+        "description": "Green 30-min candle → buy, hold 30 min, sell. Red → skip.",
+    },
 }
 
 # --- Config ---
@@ -51,7 +47,6 @@ st.set_page_config(page_title="Crypto Trader", layout="wide")
 
 @st.cache_resource
 def get_sheet():
-    # Get sheet ID from Streamlit secrets or env var
     try:
         sheet_id = st.secrets["GOOGLE_SHEET_ID"]
     except (KeyError, FileNotFoundError):
@@ -61,7 +56,6 @@ def get_sheet():
         st.error("GOOGLE_SHEET_ID not configured.")
         st.stop()
 
-    # Get Google credentials: Streamlit secrets [gcp_service_account] table, or local file
     try:
         creds_dict = dict(st.secrets["gcp_service_account"])
         gc = gspread.service_account_from_dict(creds_dict)
@@ -72,41 +66,32 @@ def get_sheet():
 
 
 @st.cache_data(ttl=60)
-def get_performance_data():
+def get_data():
     sheet = get_sheet()
-    return sheet.worksheet("performance").get_all_records()
-
-
-@st.cache_data(ttl=60)
-def get_trades_data():
-    sheet = get_sheet()
-    return sheet.worksheet("trades").get_all_records()
+    performance = sheet.worksheet("performance").get_all_records()
+    trades = sheet.worksheet("trades").get_all_records()
+    return performance, trades
 
 
 # --- UI ---
 
 st.title("Crypto Trader")
-st.caption("BTC/USD paper trading strategies — updated every minute")
+st.caption("BTC/USD paper trading strategies — $100 budget each")
 
 try:
-    performance = get_performance_data()
-    trades = get_trades_data()
+    performance, trades = get_data()
 except Exception as e:
     st.error(f"Failed to load data: {e}")
     st.stop()
 
-# Build lookup: strategy_id -> performance row
 perf_by_id = {r["strategy_id"]: r for r in performance}
 
-# Render a card for each registered strategy
 cols = st.columns(len(STRATEGIES))
 
 for i, (strategy_id, info) in enumerate(STRATEGIES.items()):
     with cols[i]:
         st.subheader(info["name"])
-        st.write(info["description"])
-
-        st.divider()
+        st.caption(info["description"])
 
         perf = perf_by_id.get(strategy_id)
         if perf:
@@ -121,29 +106,18 @@ for i, (strategy_id, info) in enumerate(STRATEGIES.items()):
                 delta_color="normal",
             )
 
-            st.caption(f"Last updated: {str(perf['last_updated'])[:19]} UTC")
+            # Compact recent trades
+            my_trades = [t for t in trades if t["strategy_id"] == strategy_id]
+            if my_trades:
+                st.caption("Recent trades:")
+                for t in sorted(my_trades, key=lambda x: x["timestamp"], reverse=True):
+                    side = t["side"]
+                    price = float(t["price"])
+                    st.text(f"  {side} @ ${price:,.2f}")
+
+            st.caption(f"Updated: {str(perf['last_updated'])[:16]} UTC")
         else:
-            st.info("Waiting for first data...")
+            st.info("Waiting for data...")
 
-# Recent trades per strategy
-st.subheader("Recent Trades")
-
-for strategy_id, info in STRATEGIES.items():
-    my_trades = [t for t in trades if t["strategy_id"] == strategy_id]
-    if my_trades:
-        st.caption(info["name"])
-        df = pd.DataFrame(my_trades)
-        df["qty"] = df["qty"].astype(float)
-        df["price"] = df["price"].astype(float)
-        df["value"] = (df["qty"] * df["price"]).round(2)
-        df["timestamp"] = df["timestamp"].str[:19]
-        df = df.sort_values("timestamp", ascending=False)
-        st.dataframe(
-            df[["timestamp", "side", "qty", "price", "value"]],
-            use_container_width=True,
-            hide_index=True,
-        )
-
-# Footer
 st.divider()
-st.caption("Data refreshes every 60 seconds. Each strategy starts with a $100 virtual budget.")
+st.caption("Auto-refreshes every 60s.")
