@@ -1,0 +1,13 @@
+.env
+trades.db
+trades.db-wal
+trades.db-shm
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+*.egg-info/
+dist/
+build/
+.DS_Store
+*.log
