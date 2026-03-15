@@ -8,10 +8,12 @@ set -euo pipefail
 
 REPO_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 VENV_DIR="$REPO_DIR/.venv"
-SERVICES=("buy_and_hold" "minute_momentum" "dashboard")
+CURRENT_USER="$(whoami)"
+SERVICES=("buy_and_hold" "minute_momentum")
 
-echo "=== Crypto Trader Setup ==="
-echo "Repo: $REPO_DIR"
+echo "=== Crypto Trader Pi Setup ==="
+echo "Directory: $REPO_DIR"
+echo "User: $CURRENT_USER"
 echo ""
 
 # 1. Create virtual environment
@@ -30,8 +32,6 @@ echo "Installing dependencies..."
 if [ ! -f "$REPO_DIR/.env" ]; then
     echo ""
     echo "!! No .env file found."
-    echo "   Copy the example and fill in your API keys:"
-    echo ""
     echo "   cp $REPO_DIR/.env.example $REPO_DIR/.env"
     echo "   nano $REPO_DIR/.env"
     echo ""
@@ -39,17 +39,30 @@ if [ ! -f "$REPO_DIR/.env" ]; then
     exit 1
 fi
 
-# 3. Install systemd services
+# 3. Check for Google credentials
+if [ ! -f "$REPO_DIR/credentials.json" ]; then
+    echo ""
+    echo "!! No credentials.json found."
+    echo "   Download your Google service account JSON key and place it at:"
+    echo "   $REPO_DIR/credentials.json"
+    echo ""
+    echo "   Then re-run this script."
+    exit 1
+fi
+
+# 4. Install systemd services (fix user + paths for this machine)
 echo ""
 echo "Installing systemd services..."
 for svc in "${SERVICES[@]}"; do
-    sudo cp "$REPO_DIR/deploy/${svc}.service" /etc/systemd/system/
+    # Replace User and paths to match this machine
+    sed "s|User=.*|User=$CURRENT_USER|; s|WorkingDirectory=.*|WorkingDirectory=$REPO_DIR|; s|ExecStart=.*|ExecStart=$VENV_DIR/bin/python $REPO_DIR/${svc}.py|" \
+        "$REPO_DIR/deploy/${svc}.service" | sudo tee /etc/systemd/system/${svc}.service > /dev/null
     echo "  Installed ${svc}.service"
 done
 
 sudo systemctl daemon-reload
 
-# 4. Enable and start services
+# 5. Enable and start services
 echo ""
 echo "Enabling and starting services..."
 for svc in "${SERVICES[@]}"; do
@@ -57,7 +70,7 @@ for svc in "${SERVICES[@]}"; do
     echo "  Started ${svc}.service"
 done
 
-# 5. Status
+# 6. Status
 echo ""
 echo "=== Service Status ==="
 for svc in "${SERVICES[@]}"; do
@@ -65,13 +78,11 @@ for svc in "${SERVICES[@]}"; do
     echo "  ${svc}: $status"
 done
 
-# 6. Dashboard URL
-IP=$(hostname -I | awk '{print $1}')
 echo ""
 echo "=== Setup Complete ==="
-echo "Dashboard: http://${IP}:5000"
 echo ""
 echo "View logs:"
 echo "  journalctl -u buy_and_hold -f"
 echo "  journalctl -u minute_momentum -f"
-echo "  journalctl -u dashboard -f"
+echo ""
+echo "Dashboard: deploy separately on Streamlit Cloud (see README)"

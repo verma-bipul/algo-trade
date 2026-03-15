@@ -5,21 +5,24 @@ Algorithmic trading strategies using Alpaca paper trading.
 ## Structure
 
 ```
-crypto/     # BTC/USD strategies (24/7, designed for Raspberry Pi)
+crypto/     # BTC/USD strategies (24/7 on Raspberry Pi)
 stocks/     # Equity strategies (coming soon)
 ```
 
-## Crypto Strategies
+## Crypto
 
-| Strategy | Description | Budget |
-|----------|-------------|--------|
-| **Buy & Hold** | Buy $100 of BTC at startup, hold forever. Benchmark. | $100 |
-| **1-Min Momentum** | Green 1-min candle → buy, hold 1 min, sell. Red → skip. | $100 |
+Two BTC/USD strategies running on a Pi, with a Streamlit Cloud dashboard:
 
-See [crypto/README.md](crypto/README.md) for setup and deployment instructions.
+| Strategy | Description |
+|----------|-------------|
+| **Buy & Hold** | Buy $100 BTC, hold forever (benchmark) |
+| **1-Min Momentum** | Green candle → buy, hold 1 min, sell |
+
+See [crypto/README.md](crypto/README.md) for full setup instructions.
 
 ## Requirements
 
 - Python 3.10+
 - Alpaca paper trading account ([alpaca.markets](https://alpaca.markets))
-- Raspberry Pi (or any always-on Linux box) for 24/7 crypto trading
+- Google Cloud service account (free, for Sheets API)
+- Raspberry Pi or always-on Linux box

@@ -1,89 +1,82 @@
-# Crypto Trader
+# Crypto Trading Strategies
 
-Automated BTC/USD paper trading on Alpaca, designed to run 24/7 on a Raspberry Pi.
+BTC/USD paper trading via Alpaca. Strategies run 24/7 on a Raspberry Pi, trade data is logged to Google Sheets, and the dashboard runs on Streamlit Cloud.
+
+## Architecture
+
+```
+Raspberry Pi                    Google Sheets              Streamlit Cloud
+┌─────────────────┐   writes   ┌──────────────┐   reads   ┌───────────────┐
+│ buy_and_hold.py  │──────────>│              │<──────────│               │
+│ minute_momentum  │──────────>│  Trade Log   │           │   Dashboard   │
+│                  │           │  Heartbeats  │           │               │
+└─────────────────┘           └──────────────┘           └───────────────┘
+        │                                                        │
+        └──── trades via Alpaca API ─────────────────────────────┘
+                                                          (reads BTC price)
+```
 
 ## Strategies
 
 | Strategy | Description | Budget |
 |----------|-------------|--------|
-| **Buy & Hold** | Buy $100 of BTC at startup, hold forever. Benchmark baseline. | $100 |
-| **1-Min Momentum** | Every minute: green candle → buy, hold 1 min, sell. Red → skip. | $100 |
+| **Buy & Hold** | Buy $100 of BTC at startup, hold forever. Benchmark. | $100 |
+| **1-Min Momentum** | Green 1-min candle → buy, hold 1 min, sell. Red → skip. | $100 |
 
-Both strategies share one Alpaca paper account ($100k) but each tracks its own $100 virtual budget via SQLite.
+## Setup
 
-## Quick Start
+### 1. Google Cloud Service Account (one-time)
+
+1. Go to [Google Cloud Console](https://console.cloud.google.com/)
+2. Create a project (or use existing)
+3. Enable the **Google Sheets API** (APIs & Services → Enable APIs)
+4. Create a **Service Account** (IAM → Service Accounts → Create)
+5. Create a key for it → download the JSON file
+6. Save it as `credentials.json` in this directory
+
+### 2. Google Sheet (one-time)
+
+1. Create a new Google Sheet at [sheets.google.com](https://sheets.google.com)
+2. Copy the Sheet ID from the URL: `https://docs.google.com/spreadsheets/d/SHEET_ID_HERE/edit`
+3. Share the sheet with your service account email (found in credentials.json under `client_email`) — give it **Editor** access
+4. The code auto-creates the needed tabs (trades, strategies, heartbeats) on first run
+
+### 3. Raspberry Pi
 
 ```bash
-# Clone
-git clone <your-repo-url> crypto-trader
-cd crypto-trader
-
-# Setup
-python3 -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt
+git clone https://github.com/verma-bipul/algo-trade.git
+cd algo-trade/crypto
 
 # Configure
 cp .env.example .env
-# Edit .env with your Alpaca API keys
+nano .env              # Add: Alpaca keys + GOOGLE_SHEET_ID
+# Copy credentials.json here
 
-# Run strategies
-python buy_and_hold.py      # Terminal 1
-python minute_momentum.py   # Terminal 2
-python dashboard.py         # Terminal 3 → http://localhost:5000
-```
-
-## Raspberry Pi Deployment
-
-```bash
-# On your Pi, clone the repo then:
+# Deploy
 bash deploy/setup.sh
 ```
 
-This creates a venv, installs deps, and sets up systemd services so everything runs on boot.
+### 4. Streamlit Dashboard
 
-### Manage Services
+1. Go to [share.streamlit.io](https://share.streamlit.io)
+2. Connect your GitHub repo
+3. Set main file: `crypto/dashboard.py`
+4. Add secrets (Settings → Secrets):
+   ```
+   APCA_API_KEY_ID = "your_key"
+   APCA_API_SECRET_KEY = "your_secret"
+   GOOGLE_SHEET_ID = "your_sheet_id"
+   GOOGLE_CREDENTIALS_JSON = '{"type":"service_account",...}'
+   ```
+5. Deploy
 
+## Monitoring
+
+The dashboard shows a green/red indicator for each strategy based on heartbeats. If a strategy hasn't sent a heartbeat in 10 minutes, it shows as offline.
+
+To check on the Pi directly:
 ```bash
-# Check status
 sudo systemctl status buy_and_hold
 sudo systemctl status minute_momentum
-sudo systemctl status dashboard
-
-# View logs
-journalctl -u minute_momentum -f
-
-# Stop/start
-sudo systemctl stop minute_momentum
-sudo systemctl start minute_momentum
+journalctl -u minute_momentum -f   # live logs
 ```
-
-## Dashboard
-
-Flask web dashboard on port 5000 showing:
-- Per-strategy equity, P&L, position state
-- Equity comparison chart (Buy & Hold vs Momentum)
-- Recent trades table
-
-Auto-refreshes every 60 seconds.
-
-## Project Structure
-
-```
-config.py              # Shared Alpaca clients + logging
-portfolio.py           # SQLite portfolio tracker (per-strategy budgets)
-buy_and_hold.py        # Strategy 1
-minute_momentum.py     # Strategy 2
-dashboard.py           # Flask dashboard
-templates/
-  dashboard.html       # Dashboard template (Bootstrap 5 + Chart.js)
-deploy/
-  *.service            # systemd unit files
-  setup.sh             # Pi setup script
-```
-
-## Requirements
-
-- Python 3.10+
-- Alpaca paper trading account (free at [alpaca.markets](https://alpaca.markets))
-- Raspberry Pi (or any Linux box) for 24/7 operation

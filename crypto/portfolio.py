@@ -1,231 +1,198 @@
 """
-Per-strategy portfolio tracker backed by SQLite.
+Per-strategy portfolio tracker backed by Google Sheets.
 
 Each strategy gets a virtual cash budget ($100 default) while sharing
 a single Alpaca paper account. All trades go through Alpaca for real
-execution, but budget enforcement and P&L tracking happen locally.
+execution, but budget enforcement and P&L tracking happen here.
+
+Google Sheet tabs:
+  - "trades"      : timestamp, strategy_id, symbol, side, qty, price, order_id
+  - "strategies"  : strategy_id, display_name, initial_cash, created_at
+  - "heartbeats"  : strategy_id, last_seen, status
 """
 
-import sqlite3
-import threading
+import time
 from datetime import datetime, timezone
 
-import pandas as pd
 from alpaca.trading.requests import MarketOrderRequest
 from alpaca.trading.enums import OrderSide, TimeInForce
 
-from config import DB_PATH, get_logger
+from config import get_gsheet, get_logger
 
 logger = get_logger("portfolio")
 
-_write_lock = threading.Lock()
-
-
-def _init_db(conn: sqlite3.Connection):
-    """Create tables if they don't exist."""
-    conn.executescript("""
-        PRAGMA journal_mode=WAL;
-
-        CREATE TABLE IF NOT EXISTS strategies (
-            strategy_id TEXT PRIMARY KEY,
-            display_name TEXT NOT NULL,
-            initial_cash REAL NOT NULL,
-            created_at TEXT NOT NULL
-        );
-
-        CREATE TABLE IF NOT EXISTS trades (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            strategy_id TEXT NOT NULL,
-            timestamp TEXT NOT NULL,
-            symbol TEXT NOT NULL,
-            side TEXT NOT NULL,
-            qty REAL NOT NULL,
-            price REAL NOT NULL,
-            order_id TEXT,
-            notes TEXT
-        );
-
-        CREATE TABLE IF NOT EXISTS positions (
-            strategy_id TEXT NOT NULL,
-            symbol TEXT NOT NULL,
-            qty REAL NOT NULL DEFAULT 0,
-            avg_entry_price REAL NOT NULL DEFAULT 0,
-            PRIMARY KEY (strategy_id, symbol)
-        );
-    """)
-
 
 class PortfolioTracker:
-    """Tracks a single strategy's cash, positions, and trades."""
+    """Tracks a single strategy's cash, positions, and trades via Google Sheets."""
 
     def __init__(self, strategy_id: str, display_name: str, initial_cash: float = 100.0):
         self.strategy_id = strategy_id
         self.display_name = display_name
         self.initial_cash = initial_cash
 
-        conn = self._connect()
-        _init_db(conn)
+        # Connect to Google Sheet
+        self.sheet = get_gsheet()
+        self._register_strategy()
 
-        # Register strategy if new
-        existing = conn.execute(
-            "SELECT 1 FROM strategies WHERE strategy_id = ?", (strategy_id,)
-        ).fetchone()
-        if not existing:
-            conn.execute(
-                "INSERT INTO strategies (strategy_id, display_name, initial_cash, created_at) VALUES (?, ?, ?, ?)",
-                (strategy_id, display_name, initial_cash, datetime.now(timezone.utc).isoformat()),
-            )
-            conn.commit()
-        conn.close()
+        # Build in-memory state from existing trades
+        self._cash = initial_cash
+        self._position = {"qty": 0.0, "avg_entry_price": 0.0}
+        self._rebuild_state()
 
-    def _connect(self) -> sqlite3.Connection:
-        conn = sqlite3.connect(DB_PATH)
-        conn.row_factory = sqlite3.Row
-        return conn
+        logger.info(
+            f"[{strategy_id}] Initialized — cash=${self._cash:.2f}, "
+            f"position={self._position['qty']:.8f} BTC"
+        )
+
+    def _register_strategy(self):
+        """Add strategy to the strategies sheet if not already there."""
+        ws = self.sheet.worksheet("strategies")
+        records = ws.get_all_records()
+        if not any(r["strategy_id"] == self.strategy_id for r in records):
+            ws.append_row([
+                self.strategy_id,
+                self.display_name,
+                self.initial_cash,
+                datetime.now(timezone.utc).isoformat(),
+            ])
+
+    def _rebuild_state(self):
+        """Read all trades from the sheet and rebuild cash + position in memory."""
+        ws = self.sheet.worksheet("trades")
+        records = ws.get_all_records()
+        my_trades = [r for r in records if r["strategy_id"] == self.strategy_id]
+
+        self._cash = self.initial_cash
+        self._position = {"qty": 0.0, "avg_entry_price": 0.0}
+
+        for t in my_trades:
+            qty = float(t["qty"])
+            price = float(t["price"])
+
+            if t["side"] == "BUY":
+                self._cash -= qty * price
+                old_qty = self._position["qty"]
+                old_avg = self._position["avg_entry_price"]
+                new_qty = old_qty + qty
+                self._position["avg_entry_price"] = (
+                    ((old_qty * old_avg) + (qty * price)) / new_qty if new_qty > 0 else 0
+                )
+                self._position["qty"] = new_qty
+            elif t["side"] == "SELL":
+                self._cash += qty * price
+                self._position["qty"] = max(self._position["qty"] - qty, 0)
+                if self._position["qty"] == 0:
+                    self._position["avg_entry_price"] = 0
 
     def get_cash_balance(self) -> float:
-        """Cash = initial_cash - sum(buys) + sum(sells), computed from trade history."""
-        conn = self._connect()
-        row = conn.execute(
-            """
-            SELECT
-                COALESCE(SUM(CASE WHEN side = 'BUY' THEN qty * price ELSE 0 END), 0) AS total_bought,
-                COALESCE(SUM(CASE WHEN side = 'SELL' THEN qty * price ELSE 0 END), 0) AS total_sold
-            FROM trades WHERE strategy_id = ?
-            """,
-            (self.strategy_id,),
-        ).fetchone()
-        conn.close()
-        return self.initial_cash - row["total_bought"] + row["total_sold"]
+        return self._cash
 
     def get_position(self, symbol: str) -> dict:
-        """Return {qty, avg_entry_price} for a symbol, or zeros if no position."""
-        conn = self._connect()
-        row = conn.execute(
-            "SELECT qty, avg_entry_price FROM positions WHERE strategy_id = ? AND symbol = ?",
-            (self.strategy_id, symbol),
-        ).fetchone()
-        conn.close()
-        if row:
-            return {"qty": row["qty"], "avg_entry_price": row["avg_entry_price"]}
-        return {"qty": 0.0, "avg_entry_price": 0.0}
+        return dict(self._position)
 
     def can_buy(self, symbol: str, qty: float, price: float) -> bool:
-        """Check if there's enough virtual cash for this purchase."""
-        return qty * price <= self.get_cash_balance()
+        return qty * price <= self._cash
 
     def execute_buy(self, symbol: str, qty: float, trading_client) -> dict:
-        """Submit a real Alpaca market buy, then record at fill price."""
+        """Submit a real Alpaca buy order, record at fill price."""
         logger.info(f"[{self.strategy_id}] Submitting BUY {qty:.8f} {symbol}")
 
         order = trading_client.submit_order(
             MarketOrderRequest(
-                symbol=symbol,
-                qty=qty,
-                side=OrderSide.BUY,
-                time_in_force=TimeInForce.GTC,
+                symbol=symbol, qty=qty, side=OrderSide.BUY, time_in_force=TimeInForce.GTC,
             )
         )
 
-        # Wait for fill
-        filled_order = self._wait_for_fill(order.id, trading_client)
-        fill_price = float(filled_order.filled_avg_price)
-        fill_qty = float(filled_order.filled_qty)
+        filled = self._wait_for_fill(order.id, trading_client)
+        fill_price = float(filled.filled_avg_price)
+        fill_qty = float(filled.filled_qty)
 
-        self._record_trade(symbol, "BUY", fill_qty, fill_price, str(order.id))
+        # Update in-memory state
+        old_qty = self._position["qty"]
+        old_avg = self._position["avg_entry_price"]
+        new_qty = old_qty + fill_qty
+        self._position["avg_entry_price"] = (
+            ((old_qty * old_avg) + (fill_qty * fill_price)) / new_qty if new_qty > 0 else 0
+        )
+        self._position["qty"] = new_qty
+        self._cash -= fill_qty * fill_price
+
+        # Log to Google Sheet
+        self._append_trade(symbol, "BUY", fill_qty, fill_price, str(order.id))
         logger.info(f"[{self.strategy_id}] BOUGHT {fill_qty:.8f} {symbol} @ ${fill_price:,.2f}")
 
         return {"qty": fill_qty, "price": fill_price, "order_id": str(order.id)}
 
     def execute_sell(self, symbol: str, qty: float, trading_client) -> dict:
-        """Submit a real Alpaca market sell, then record at fill price."""
+        """Submit a real Alpaca sell order, record at fill price."""
         logger.info(f"[{self.strategy_id}] Submitting SELL {qty:.8f} {symbol}")
 
         order = trading_client.submit_order(
             MarketOrderRequest(
-                symbol=symbol,
-                qty=qty,
-                side=OrderSide.SELL,
-                time_in_force=TimeInForce.GTC,
+                symbol=symbol, qty=qty, side=OrderSide.SELL, time_in_force=TimeInForce.GTC,
             )
         )
 
-        filled_order = self._wait_for_fill(order.id, trading_client)
-        fill_price = float(filled_order.filled_avg_price)
-        fill_qty = float(filled_order.filled_qty)
+        filled = self._wait_for_fill(order.id, trading_client)
+        fill_price = float(filled.filled_avg_price)
+        fill_qty = float(filled.filled_qty)
 
-        self._record_trade(symbol, "SELL", fill_qty, fill_price, str(order.id))
+        # Update in-memory state
+        self._position["qty"] = max(self._position["qty"] - fill_qty, 0)
+        if self._position["qty"] == 0:
+            self._position["avg_entry_price"] = 0
+        self._cash += fill_qty * fill_price
+
+        # Log to Google Sheet
+        self._append_trade(symbol, "SELL", fill_qty, fill_price, str(order.id))
         logger.info(f"[{self.strategy_id}] SOLD {fill_qty:.8f} {symbol} @ ${fill_price:,.2f}")
 
         return {"qty": fill_qty, "price": fill_price, "order_id": str(order.id)}
 
     def go_to_cash(self, symbol: str, trading_client) -> dict | None:
-        """Sell entire position in a symbol. Returns None if no position."""
-        pos = self.get_position(symbol)
-        if pos["qty"] <= 0:
-            logger.info(f"[{self.strategy_id}] No {symbol} position to sell")
+        """Sell entire position."""
+        if self._position["qty"] <= 0:
             return None
-        return self.execute_sell(symbol, pos["qty"], trading_client)
+        return self.execute_sell(symbol, self._position["qty"], trading_client)
 
     def get_equity(self, current_prices: dict) -> float:
-        """Total equity = cash + market value of all holdings."""
-        cash = self.get_cash_balance()
-        conn = self._connect()
-        rows = conn.execute(
-            "SELECT symbol, qty FROM positions WHERE strategy_id = ? AND qty > 0",
-            (self.strategy_id,),
-        ).fetchall()
-        conn.close()
-
-        holdings_value = sum(row["qty"] * current_prices.get(row["symbol"], 0) for row in rows)
-        return cash + holdings_value
+        return self._cash + self._position["qty"] * current_prices.get("BTC/USD", 0)
 
     def get_pnl(self, current_prices: dict) -> dict:
-        """Compute realized and unrealized P&L."""
-        conn = self._connect()
-
-        # Realized P&L: sum of (sell_price - avg_entry_at_time) * qty for all sells
-        # Simplified: total equity change from initial
         equity = self.get_equity(current_prices)
-        total_pnl = equity - self.initial_cash
-        pct = (total_pnl / self.initial_cash) * 100
-
-        # Unrealized: current holdings value - cost basis
-        rows = conn.execute(
-            "SELECT symbol, qty, avg_entry_price FROM positions WHERE strategy_id = ? AND qty > 0",
-            (self.strategy_id,),
-        ).fetchall()
-        conn.close()
-
-        unrealized = sum(
-            row["qty"] * (current_prices.get(row["symbol"], 0) - row["avg_entry_price"])
-            for row in rows
-        )
-        realized = total_pnl - unrealized
-
+        total = equity - self.initial_cash
+        pct = (total / self.initial_cash) * 100
+        unrealized = self._position["qty"] * (
+            current_prices.get("BTC/USD", 0) - self._position["avg_entry_price"]
+        ) if self._position["qty"] > 0 else 0
+        realized = total - unrealized
         return {
             "realized": round(realized, 2),
             "unrealized": round(unrealized, 2),
-            "total": round(total_pnl, 2),
+            "total": round(total, 2),
             "pct": round(pct, 2),
         }
 
-    def get_trade_history(self) -> pd.DataFrame:
-        """Return all trades as a DataFrame."""
-        conn = self._connect()
-        df = pd.read_sql_query(
-            "SELECT * FROM trades WHERE strategy_id = ? ORDER BY timestamp DESC",
-            conn,
-            params=(self.strategy_id,),
-        )
-        conn.close()
-        return df
+    def update_heartbeat(self):
+        """Update the heartbeat timestamp so the dashboard knows we're alive."""
+        now = datetime.now(timezone.utc).isoformat()
+        try:
+            ws = self.sheet.worksheet("heartbeats")
+            records = ws.get_all_records()
+            for i, r in enumerate(records):
+                if r["strategy_id"] == self.strategy_id:
+                    ws.update_cell(i + 2, 2, now)  # +2: header + 0-index
+                    ws.update_cell(i + 2, 3, "running")
+                    return
+            # Not found — add new row
+            ws.append_row([self.strategy_id, now, "running"])
+        except Exception as e:
+            logger.warning(f"Heartbeat update failed: {e}")
 
     # --- Internal helpers ---
 
     def _wait_for_fill(self, order_id, trading_client, max_attempts: int = 30):
         """Poll until order is filled (crypto fills are usually instant)."""
-        import time
         for _ in range(max_attempts):
             order = trading_client.get_order_by_id(order_id)
             if order.status.value == "filled":
@@ -233,54 +200,11 @@ class PortfolioTracker:
             time.sleep(1)
         raise TimeoutError(f"Order {order_id} not filled after {max_attempts}s")
 
-    def _record_trade(self, symbol: str, side: str, qty: float, price: float, order_id: str):
-        """Record trade and update position atomically."""
+    def _append_trade(self, symbol: str, side: str, qty: float, price: float, order_id: str):
+        """Append a trade row to the Google Sheet."""
         now = datetime.now(timezone.utc).isoformat()
-
-        with _write_lock:
-            conn = self._connect()
-            try:
-                # Insert trade
-                conn.execute(
-                    "INSERT INTO trades (strategy_id, timestamp, symbol, side, qty, price, order_id) VALUES (?, ?, ?, ?, ?, ?, ?)",
-                    (self.strategy_id, now, symbol, side, qty, price, order_id),
-                )
-
-                # Update position
-                pos = conn.execute(
-                    "SELECT qty, avg_entry_price FROM positions WHERE strategy_id = ? AND symbol = ?",
-                    (self.strategy_id, symbol),
-                ).fetchone()
-
-                if side == "BUY":
-                    if pos:
-                        old_qty = pos["qty"]
-                        old_avg = pos["avg_entry_price"]
-                        new_qty = old_qty + qty
-                        # Weighted average entry price
-                        new_avg = ((old_qty * old_avg) + (qty * price)) / new_qty if new_qty > 0 else 0
-                        conn.execute(
-                            "UPDATE positions SET qty = ?, avg_entry_price = ? WHERE strategy_id = ? AND symbol = ?",
-                            (new_qty, new_avg, self.strategy_id, symbol),
-                        )
-                    else:
-                        conn.execute(
-                            "INSERT INTO positions (strategy_id, symbol, qty, avg_entry_price) VALUES (?, ?, ?, ?)",
-                            (self.strategy_id, symbol, qty, price),
-                        )
-                elif side == "SELL":
-                    if pos:
-                        new_qty = pos["qty"] - qty
-                        # Keep avg_entry_price unchanged on sells (for P&L calc)
-                        avg = pos["avg_entry_price"] if new_qty > 0 else 0
-                        conn.execute(
-                            "UPDATE positions SET qty = ?, avg_entry_price = ? WHERE strategy_id = ? AND symbol = ?",
-                            (max(new_qty, 0), avg, self.strategy_id, symbol),
-                        )
-
-                conn.commit()
-            except Exception:
-                conn.rollback()
-                raise
-            finally:
-                conn.close()
+        try:
+            ws = self.sheet.worksheet("trades")
+            ws.append_row([now, self.strategy_id, symbol, side, qty, price, order_id])
+        except Exception as e:
+            logger.error(f"Failed to log trade to sheet: {e}")

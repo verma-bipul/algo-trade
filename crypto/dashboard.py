@@ -1,191 +1,226 @@
 """
-Flask dashboard for monitoring crypto trading strategies.
+Streamlit dashboard for monitoring crypto trading strategies.
 
-Shows per-strategy stats, equity comparison chart, and recent trades.
-Auto-refreshes every 60 seconds.
+Reads trade data from Google Sheets, fetches live BTC price from Alpaca.
+Deploy on Streamlit Cloud — NOT on the Pi.
 """
 
+import os
 import time
-import sqlite3
-from functools import lru_cache
+import json
+from datetime import datetime, timezone, timedelta
 
-from flask import Flask, render_template, jsonify
+import streamlit as st
+import pandas as pd
+import gspread
+from dotenv import load_dotenv
+from alpaca.data.historical import CryptoHistoricalDataClient
 from alpaca.data.requests import CryptoLatestQuoteRequest
 
-from config import crypto_data_client, DB_PATH, get_logger
-
-app = Flask(__name__)
-logger = get_logger("dashboard")
+load_dotenv()
 
 SYMBOL = "BTC/USD"
 
-# Price cache (avoid hammering Alpaca on every request)
-_price_cache = {"price": 0.0, "timestamp": 0}
-CACHE_TTL = 30  # seconds
+st.set_page_config(page_title="Crypto Trader", layout="wide")
 
 
-def get_btc_price() -> float:
-    """Get BTC price with 30s cache."""
-    now = time.time()
-    if now - _price_cache["timestamp"] < CACHE_TTL and _price_cache["price"] > 0:
-        return _price_cache["price"]
+# --- Connections (cached) ---
 
-    try:
-        quote = crypto_data_client.get_crypto_latest_quote(
-            CryptoLatestQuoteRequest(symbol_or_symbols=SYMBOL)
-        )
-        price = float(quote[SYMBOL].ask_price)
-        _price_cache["price"] = price
-        _price_cache["timestamp"] = now
-        return price
-    except Exception as e:
-        logger.error(f"Error fetching BTC price: {e}")
-        return _price_cache["price"]  # return stale price on error
+@st.cache_resource
+def get_alpaca_client():
+    key = os.getenv("APCA_API_KEY_ID")
+    secret = os.getenv("APCA_API_SECRET_KEY")
+    if not key or not secret:
+        st.error("Alpaca API keys not configured.")
+        st.stop()
+    return CryptoHistoricalDataClient(key, secret)
 
 
-def get_db():
-    conn = sqlite3.connect(DB_PATH)
-    conn.row_factory = sqlite3.Row
-    return conn
+@st.cache_resource
+def get_sheet():
+    sheet_id = os.getenv("GOOGLE_SHEET_ID")
+    if not sheet_id:
+        st.error("GOOGLE_SHEET_ID not configured.")
+        st.stop()
+
+    creds_json = os.getenv("GOOGLE_CREDENTIALS_JSON")
+    if creds_json:
+        gc = gspread.service_account_from_dict(json.loads(creds_json))
+    else:
+        gc = gspread.service_account(filename=os.getenv("GOOGLE_CREDS_FILE", "credentials.json"))
+    return gc.open_by_key(sheet_id)
 
 
-def get_strategy_data():
-    """Fetch all strategy stats from the database."""
-    conn = get_db()
-    strategies = conn.execute("SELECT * FROM strategies").fetchall()
+# --- Data fetching (cached with TTL) ---
+
+@st.cache_data(ttl=30)
+def get_btc_price():
+    client = get_alpaca_client()
+    quote = client.get_crypto_latest_quote(CryptoLatestQuoteRequest(symbol_or_symbols=SYMBOL))
+    return float(quote[SYMBOL].ask_price)
+
+
+@st.cache_data(ttl=30)
+def get_sheet_data():
+    sheet = get_sheet()
+    strategies = sheet.worksheet("strategies").get_all_records()
+    trades = sheet.worksheet("trades").get_all_records()
+    heartbeats = sheet.worksheet("heartbeats").get_all_records()
+    return strategies, trades, heartbeats
+
+
+def compute_strategy_stats(strategy, trades, btc_price, heartbeats):
+    """Compute cash, position, equity, P&L for one strategy."""
+    sid = strategy["strategy_id"]
+    initial_cash = float(strategy["initial_cash"])
+    my_trades = [t for t in trades if t["strategy_id"] == sid]
+
+    # Replay trades to get current state
+    cash = initial_cash
+    qty = 0.0
+    avg_entry = 0.0
+
+    for t in my_trades:
+        t_qty = float(t["qty"])
+        t_price = float(t["price"])
+        if t["side"] == "BUY":
+            cost = t_qty * t_price
+            new_qty = qty + t_qty
+            avg_entry = ((qty * avg_entry) + cost) / new_qty if new_qty > 0 else 0
+            qty = new_qty
+            cash -= cost
+        elif t["side"] == "SELL":
+            cash += t_qty * t_price
+            qty = max(qty - t_qty, 0)
+            if qty == 0:
+                avg_entry = 0
+
+    equity = cash + qty * btc_price
+    total_pnl = equity - initial_cash
+    pnl_pct = (total_pnl / initial_cash) * 100 if initial_cash > 0 else 0
+    unrealized = qty * (btc_price - avg_entry) if qty > 0 else 0
+    realized = total_pnl - unrealized
+
+    # Heartbeat status
+    hb = next((h for h in heartbeats if h["strategy_id"] == sid), None)
+    online = False
+    if hb and hb["last_seen"]:
+        try:
+            last_seen = datetime.fromisoformat(hb["last_seen"])
+            online = (datetime.now(timezone.utc) - last_seen) < timedelta(minutes=10)
+        except (ValueError, TypeError):
+            pass
+
+    return {
+        "strategy_id": sid,
+        "display_name": strategy["display_name"],
+        "state": "HOLDING" if qty > 0 else "FLAT",
+        "online": online,
+        "last_seen": hb["last_seen"] if hb else "never",
+        "qty": qty,
+        "cash": round(cash, 2),
+        "equity": round(equity, 2),
+        "pnl": round(total_pnl, 2),
+        "pnl_pct": round(pnl_pct, 2),
+        "trade_count": len(my_trades),
+    }
+
+
+# --- UI ---
+
+st.title("Crypto Trader Dashboard")
+
+try:
     btc_price = get_btc_price()
+    strategies, trades, heartbeats = get_sheet_data()
+except Exception as e:
+    st.error(f"Failed to load data: {e}")
+    st.stop()
 
-    results = []
+st.metric("BTC/USD", f"${btc_price:,.2f}")
+
+# Strategy cards
+if strategies:
+    cols = st.columns(len(strategies))
+
+    for i, s in enumerate(strategies):
+        stats = compute_strategy_stats(s, trades, btc_price, heartbeats)
+
+        with cols[i]:
+            status = "🟢 Online" if stats["online"] else "🔴 Offline"
+            st.subheader(f"{stats['display_name']}")
+            st.caption(f"{status} · Last seen: {stats['last_seen'][:19] if stats['last_seen'] != 'never' else 'never'}")
+
+            st.metric("Equity", f"${stats['equity']:.2f}",
+                       delta=f"${stats['pnl']:.2f} ({stats['pnl_pct']:.2f}%)")
+
+            c1, c2 = st.columns(2)
+            c1.metric("Cash", f"${stats['cash']:.2f}")
+            c2.metric("BTC Held", f"{stats['qty']:.8f}")
+
+            c3, c4 = st.columns(2)
+            c3.metric("Trades", stats["trade_count"])
+            c4.metric("State", stats["state"])
+
+# Equity chart
+st.subheader("Equity Over Time")
+if trades:
+    all_points = []
     for s in strategies:
         sid = s["strategy_id"]
+        initial_cash = float(s["initial_cash"])
+        my_trades = sorted(
+            [t for t in trades if t["strategy_id"] == sid],
+            key=lambda t: t["timestamp"],
+        )
 
-        # Cash balance
-        row = conn.execute(
-            """
-            SELECT
-                COALESCE(SUM(CASE WHEN side = 'BUY' THEN qty * price ELSE 0 END), 0) AS bought,
-                COALESCE(SUM(CASE WHEN side = 'SELL' THEN qty * price ELSE 0 END), 0) AS sold
-            FROM trades WHERE strategy_id = ?
-            """,
-            (sid,),
-        ).fetchone()
-        cash = s["initial_cash"] - row["bought"] + row["sold"]
+        cash = initial_cash
+        qty = 0.0
+        for t in my_trades:
+            t_qty = float(t["qty"])
+            t_price = float(t["price"])
+            if t["side"] == "BUY":
+                cash -= t_qty * t_price
+                qty += t_qty
+            else:
+                cash += t_qty * t_price
+                qty = max(qty - t_qty, 0)
+            all_points.append({
+                "time": t["timestamp"][:16],
+                "equity": round(cash + qty * t_price, 2),
+                "strategy": s["display_name"],
+            })
 
-        # Position
-        pos = conn.execute(
-            "SELECT qty, avg_entry_price FROM positions WHERE strategy_id = ? AND symbol = ?",
-            (sid, SYMBOL),
-        ).fetchone()
-
-        qty = pos["qty"] if pos else 0
-        avg_price = pos["avg_entry_price"] if pos else 0
-        holdings_value = qty * btc_price
-        equity = cash + holdings_value
-
-        # P&L
-        total_pnl = equity - s["initial_cash"]
-        pnl_pct = (total_pnl / s["initial_cash"]) * 100 if s["initial_cash"] > 0 else 0
-        unrealized = qty * (btc_price - avg_price) if qty > 0 else 0
-        realized = total_pnl - unrealized
-
-        # Trade count
-        trade_count = conn.execute(
-            "SELECT COUNT(*) AS cnt FROM trades WHERE strategy_id = ?", (sid,)
-        ).fetchone()["cnt"]
-
-        results.append({
-            "strategy_id": sid,
-            "display_name": s["display_name"],
-            "state": "HOLDING" if qty > 0 else "FLAT",
-            "qty": round(qty, 8),
-            "cash": round(cash, 2),
-            "equity": round(equity, 2),
-            "pnl": round(total_pnl, 2),
-            "pnl_pct": round(pnl_pct, 2),
-            "realized": round(realized, 2),
-            "unrealized": round(unrealized, 2),
-            "trade_count": trade_count,
+        # Current point
+        all_points.append({
+            "time": "now",
+            "equity": round(cash + qty * btc_price, 2),
+            "strategy": s["display_name"],
         })
 
-    conn.close()
-    return results
+    df_chart = pd.DataFrame(all_points)
+    if not df_chart.empty:
+        st.line_chart(df_chart, x="time", y="equity", color="strategy")
+else:
+    st.info("No trades yet — chart will appear after the first trade.")
 
-
-def get_recent_trades(limit=50):
-    """Fetch recent trades across all strategies."""
-    conn = get_db()
-    rows = conn.execute(
-        "SELECT * FROM trades ORDER BY timestamp DESC LIMIT ?", (limit,)
-    ).fetchall()
-    conn.close()
-    return [dict(r) for r in rows]
-
-
-def get_equity_series():
-    """Build equity time series from trade history for charting."""
-    conn = get_db()
-    strategies = conn.execute("SELECT * FROM strategies").fetchall()
-    btc_price = get_btc_price()
-
-    series = {}
-    for s in strategies:
-        sid = s["strategy_id"]
-        trades = conn.execute(
-            "SELECT timestamp, side, qty, price FROM trades WHERE strategy_id = ? ORDER BY timestamp",
-            (sid,),
-        ).fetchall()
-
-        # Build equity points at each trade
-        cash = s["initial_cash"]
-        holding_qty = 0.0
-        points = [{"t": s["created_at"], "y": round(cash, 2)}]
-
-        for t in trades:
-            if t["side"] == "BUY":
-                cash -= t["qty"] * t["price"]
-                holding_qty += t["qty"]
-            else:
-                cash += t["qty"] * t["price"]
-                holding_qty -= t["qty"]
-
-            equity = cash + holding_qty * t["price"]
-            points.append({"t": t["timestamp"], "y": round(equity, 2)})
-
-        # Add current point
-        current_equity = cash + holding_qty * btc_price
-        points.append({"t": "now", "y": round(current_equity, 2)})
-
-        series[sid] = points
-
-    conn.close()
-    return series
-
-
-@app.route("/")
-def index():
-    strategies = get_strategy_data()
-    trades = get_recent_trades()
-    btc_price = get_btc_price()
-    return render_template(
-        "dashboard.html",
-        strategies=strategies,
-        trades=trades,
-        btc_price=btc_price,
+# Recent trades table
+st.subheader("Recent Trades")
+if trades:
+    df_trades = pd.DataFrame(trades)
+    df_trades["qty"] = df_trades["qty"].astype(float)
+    df_trades["price"] = df_trades["price"].astype(float)
+    df_trades["value"] = (df_trades["qty"] * df_trades["price"]).round(2)
+    df_trades = df_trades.sort_values("timestamp", ascending=False).head(50)
+    st.dataframe(
+        df_trades[["timestamp", "strategy_id", "side", "symbol", "qty", "price", "value"]],
+        use_container_width=True,
+        hide_index=True,
     )
+else:
+    st.info("No trades yet.")
 
-
-@app.route("/api/strategies")
-def api_strategies():
-    return jsonify({
-        "strategies": get_strategy_data(),
-        "btc_price": get_btc_price(),
-    })
-
-
-@app.route("/api/equity")
-def api_equity():
-    return jsonify(get_equity_series())
-
-
-if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=5000, debug=False)
+# Auto-refresh
+st.caption("Data refreshes every 30 seconds.")
+time.sleep(30)
+st.rerun()

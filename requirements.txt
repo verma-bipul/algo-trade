@@ -1,6 +1,5 @@
 alpaca-py
 pandas
-numpy
 python-dotenv
-pytz
 gspread
+streamlit

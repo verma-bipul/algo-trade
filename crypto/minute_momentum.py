@@ -3,9 +3,9 @@ Strategy 2: 1-Minute Candle Momentum on BTC/USD
 
 Every minute:
 - Fetch the last completed 1-minute candle
-- Green candle (close > open) AND not holding → BUY with full cash
-- Holding → SELL (exit after 1 candle regardless)
-- Red candle AND not holding → skip
+- Green candle (close > open) AND not holding -> BUY with full cash
+- Holding -> SELL (exit after 1 candle regardless)
+- Red candle AND not holding -> skip
 
 Long-only. Position held for exactly ~1 minute.
 """
@@ -35,7 +35,6 @@ def get_btc_price() -> float:
 def get_last_candle() -> dict | None:
     """Fetch the most recently completed 1-minute candle."""
     now = datetime.now(timezone.utc)
-    # Request the last 5 minutes of bars to ensure we get at least one complete candle
     start = now - timedelta(minutes=5)
 
     try:
@@ -117,11 +116,12 @@ def run():
                 else:
                     logger.info("RED signal — skipping")
 
-            # Log current state
+            # Log current state + heartbeat
             price = get_btc_price()
             equity = tracker.get_equity({SYMBOL: price})
             pnl = tracker.get_pnl({SYMBOL: price})
             logger.info(f"Equity=${equity:.2f} | P&L=${pnl['total']:.2f} ({pnl['pct']:.2f}%)")
+            tracker.update_heartbeat()
 
         except Exception as e:
             logger.error(f"Error in trading loop: {e}", exc_info=True)

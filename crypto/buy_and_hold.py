@@ -2,7 +2,7 @@
 Strategy 1: Buy & Hold BTC
 
 Buy $100 worth of BTC at startup. Hold indefinitely.
-Logs equity every 5 minutes for equity curve tracking.
+Logs equity every 5 minutes and sends heartbeat so the dashboard knows we're alive.
 This is the baseline benchmark strategy.
 """
 
@@ -46,7 +46,7 @@ def run():
         result = tracker.execute_buy(SYMBOL, qty, trading_client)
         logger.info(f"Purchase complete: {result['qty']:.8f} BTC @ ${result['price']:,.2f}")
 
-    # Monitoring loop — log equity every 5 minutes
+    # Monitoring loop — log equity every 5 minutes + heartbeat
     logger.info("Entering monitoring loop (equity logged every 5 min)")
     while True:
         try:
@@ -56,8 +56,9 @@ def run():
             logger.info(
                 f"BTC=${price:,.2f} | Equity=${equity:.2f} | P&L=${pnl['total']:.2f} ({pnl['pct']:.2f}%)"
             )
+            tracker.update_heartbeat()
         except Exception as e:
-            logger.error(f"Error fetching equity: {e}")
+            logger.error(f"Error in monitoring loop: {e}")
 
         time.sleep(EQUITY_LOG_INTERVAL)
 
