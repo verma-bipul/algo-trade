@@ -57,6 +57,7 @@ def run():
                 f"BTC=${price:,.2f} | Equity=${equity:.2f} | P&L=${pnl['total']:.2f} ({pnl['pct']:.2f}%)"
             )
             tracker.update_heartbeat()
+            tracker.update_performance(price)
         except Exception as e:
             logger.error(f"Error in monitoring loop: {e}")
 

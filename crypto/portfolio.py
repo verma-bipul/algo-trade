@@ -189,6 +189,34 @@ class PortfolioTracker:
         except Exception as e:
             logger.warning(f"Heartbeat update failed: {e}")
 
+    def update_performance(self, btc_price: float):
+        """Write current equity/P&L to the performance sheet tab."""
+        now = datetime.now(timezone.utc).isoformat()
+        prices = {"BTC/USD": btc_price}
+        equity = self.get_equity(prices)
+        pnl = self.get_pnl(prices)
+        row = [
+            self.strategy_id,
+            now,
+            round(equity, 2),
+            round(self._cash, 2),
+            round(self._position["qty"], 8),
+            round(btc_price, 2),
+            pnl["total"],
+            pnl["pct"],
+        ]
+        try:
+            ws = self.sheet.worksheet("performance")
+            records = ws.get_all_records()
+            for i, r in enumerate(records):
+                if r["strategy_id"] == self.strategy_id:
+                    ws.update(f"A{i+2}:H{i+2}", [row])
+                    return
+            # Not found — add new row
+            ws.append_row(row)
+        except Exception as e:
+            logger.warning(f"Performance update failed: {e}")
+
     # --- Internal helpers ---
 
     def _wait_for_fill(self, order_id, trading_client, max_attempts: int = 30):

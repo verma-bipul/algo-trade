@@ -57,6 +57,10 @@ def _ensure_worksheets(sheet):
         ws = sheet.add_worksheet("heartbeats", rows=10, cols=3)
         ws.append_row(["strategy_id", "last_seen", "status"])
 
+    if "performance" not in existing:
+        ws = sheet.add_worksheet("performance", rows=10, cols=8)
+        ws.append_row(["strategy_id", "last_updated", "equity", "cash", "btc_qty", "btc_price", "pnl_dollar", "pnl_pct"])
+
     # Remove default Sheet1 if our sheets were just created
     if "Sheet1" in existing and len(existing) > 1:
         try:
