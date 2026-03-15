@@ -48,26 +48,25 @@ STRATEGIES = {
 st.set_page_config(page_title="Crypto Trader", layout="wide")
 
 
-def _get_secret(key: str) -> str | None:
-    """Read from Streamlit secrets first, then fall back to env vars."""
-    try:
-        return st.secrets[key]
-    except (KeyError, FileNotFoundError):
-        return os.getenv(key)
-
-
 @st.cache_resource
 def get_sheet():
-    sheet_id = _get_secret("GOOGLE_SHEET_ID")
+    # Get sheet ID from Streamlit secrets or env var
+    try:
+        sheet_id = st.secrets["GOOGLE_SHEET_ID"]
+    except (KeyError, FileNotFoundError):
+        sheet_id = os.getenv("GOOGLE_SHEET_ID")
+
     if not sheet_id:
         st.error("GOOGLE_SHEET_ID not configured.")
         st.stop()
 
-    creds_json = _get_secret("GOOGLE_CREDENTIALS_JSON")
-    if creds_json:
-        gc = gspread.service_account_from_dict(json.loads(creds_json))
-    else:
+    # Get Google credentials: Streamlit secrets [gcp_service_account] table, or local file
+    try:
+        creds_dict = dict(st.secrets["gcp_service_account"])
+        gc = gspread.service_account_from_dict(creds_dict)
+    except (KeyError, FileNotFoundError):
         gc = gspread.service_account(filename=os.getenv("GOOGLE_CREDS_FILE", "credentials.json"))
+
     return gc.open_by_key(sheet_id)
 
 
