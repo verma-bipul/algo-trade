@@ -11,6 +11,7 @@ import os
 import json
 
 import streamlit as st
+import pandas as pd
 import gspread
 from dotenv import load_dotenv
 
@@ -76,6 +77,12 @@ def get_performance_data():
     return sheet.worksheet("performance").get_all_records()
 
 
+@st.cache_data(ttl=60)
+def get_trades_data():
+    sheet = get_sheet()
+    return sheet.worksheet("trades").get_all_records()
+
+
 # --- UI ---
 
 st.title("Crypto Trader")
@@ -83,6 +90,7 @@ st.caption("BTC/USD paper trading strategies — updated every minute")
 
 try:
     performance = get_performance_data()
+    trades = get_trades_data()
 except Exception as e:
     st.error(f"Failed to load data: {e}")
     st.stop()
@@ -116,6 +124,25 @@ for i, (strategy_id, info) in enumerate(STRATEGIES.items()):
             st.caption(f"Last updated: {str(perf['last_updated'])[:19]} UTC")
         else:
             st.info("Waiting for first data...")
+
+# Recent trades per strategy
+st.subheader("Recent Trades")
+
+for strategy_id, info in STRATEGIES.items():
+    my_trades = [t for t in trades if t["strategy_id"] == strategy_id]
+    if my_trades:
+        st.caption(info["name"])
+        df = pd.DataFrame(my_trades)
+        df["qty"] = df["qty"].astype(float)
+        df["price"] = df["price"].astype(float)
+        df["value"] = (df["qty"] * df["price"]).round(2)
+        df["timestamp"] = df["timestamp"].str[:19]
+        df = df.sort_values("timestamp", ascending=False)
+        st.dataframe(
+            df[["timestamp", "side", "qty", "price", "value"]],
+            use_container_width=True,
+            hide_index=True,
+        )
 
 # Footer
 st.divider()
