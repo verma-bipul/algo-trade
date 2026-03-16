@@ -113,13 +113,17 @@ class PortfolioTracker:
     def can_buy(self, symbol: str, qty: float, price: float) -> bool:
         return qty * price <= self._cash
 
+    def _tif(self, symbol: str) -> TimeInForce:
+        """GTC for crypto, DAY for stocks (fractional stock orders require DAY)."""
+        return TimeInForce.GTC if "/" in symbol else TimeInForce.DAY
+
     def execute_buy(self, symbol: str, qty: float, trading_client) -> dict:
         """Submit a real Alpaca buy order, record at fill price."""
         logger.info(f"[{self.strategy_id}] Submitting BUY {qty:.8f} {symbol}")
 
         order = trading_client.submit_order(
             MarketOrderRequest(
-                symbol=symbol, qty=qty, side=OrderSide.BUY, time_in_force=TimeInForce.GTC,
+                symbol=symbol, qty=qty, side=OrderSide.BUY, time_in_force=self._tif(symbol),
             )
         )
 
@@ -150,7 +154,7 @@ class PortfolioTracker:
 
         order = trading_client.submit_order(
             MarketOrderRequest(
-                symbol=symbol, qty=qty, side=OrderSide.SELL, time_in_force=TimeInForce.GTC,
+                symbol=symbol, qty=qty, side=OrderSide.SELL, time_in_force=self._tif(symbol),
             )
         )
 
