@@ -102,35 +102,35 @@ for row_start in range(0, len(strategy_list), COLS_PER_ROW):
     cols = st.columns(COLS_PER_ROW)
     for i, (strategy_id, info) in enumerate(row_items):
         with cols[i]:
-        st.subheader(info["name"])
-        st.caption(info["description"])
+            st.subheader(info["name"])
+            st.caption(info["description"])
 
-        perf = perf_by_id.get(strategy_id)
-        if perf:
-            pnl = float(perf["pnl_dollar"])
-            pnl_pct = float(perf["pnl_pct"])
-            equity = float(perf["equity"])
+            perf = perf_by_id.get(strategy_id)
+            if perf:
+                pnl = float(perf["pnl_dollar"])
+                pnl_pct = float(perf["pnl_pct"])
+                equity = float(perf["equity"])
 
-            st.metric(
-                "Return",
-                f"${pnl:+.2f} ({pnl_pct:+.2f}%)",
-                delta=f"Equity: ${equity:.2f}",
-                delta_color="normal",
-            )
+                st.metric(
+                    "Return",
+                    f"${pnl:+.2f} ({pnl_pct:+.2f}%)",
+                    delta=f"Equity: ${equity:.2f}",
+                    delta_color="normal",
+                )
 
-            # Compact recent trades (last 5 only)
-            my_trades = sorted(
-                [t for t in trades if t["strategy_id"] == strategy_id],
-                key=lambda x: x["timestamp"], reverse=True,
-            )[:5]
-            if my_trades:
-                st.caption("Recent trades:")
-                for t in my_trades:
-                    st.text(f"  {t['side']} @ ${float(t['price']):,.2f}")
+                # Compact recent trades (last 5 only)
+                my_trades = sorted(
+                    [t for t in trades if t["strategy_id"] == strategy_id],
+                    key=lambda x: x["timestamp"], reverse=True,
+                )[:5]
+                if my_trades:
+                    st.caption("Recent trades:")
+                    for t in my_trades:
+                        st.text(f"  {t['side']} @ ${float(t['price']):,.2f}")
 
-            st.caption(f"Updated: {str(perf['last_updated'])[:16]} UTC")
-        else:
-            st.info("Waiting for data...")
+                st.caption(f"Updated: {str(perf['last_updated'])[:16]} UTC")
+            else:
+                st.info("Waiting for data...")
 
 st.divider()
 st.caption("Auto-refreshes every 60s.")
