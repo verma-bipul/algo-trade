@@ -38,7 +38,7 @@ STRATEGIES = {
         "name": "BTC 30-Min",
         "description": "Green 30-min candle → buy, hold 30 min, sell. Red → skip.",
     },
-    "spy_rand1": {
+    "spy_rand5": {
         "name": "SPY Random 5-Min",
         "description": "Flip a coin every 5 min. Heads → buy, Tails → short. Close and repeat.",
     },

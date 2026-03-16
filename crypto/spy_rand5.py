@@ -1,11 +1,10 @@
 """
 SPY Random 5-Minute Strategy
 
-Every 5 minutes during market hours:
-- Close any open position
-- Flip a coin: heads -> buy, tails -> sell (short)
+Every 5 minutes:
+- Close any open position (long or short)
+- Flip a coin: heads -> buy, tails -> short
 - Hold 5 min, close, repeat
-- Market closed -> sleep 5 min, send heartbeat, check again
 """
 
 import time
@@ -19,7 +18,7 @@ from portfolio import PortfolioTracker
 
 SYMBOL = "SPY"
 BUDGET = 100.0
-INTERVAL = 5  # minutes
+INTERVAL = 5
 
 logger = get_logger("spy_rand5")
 tracker = PortfolioTracker("spy_rand5", "SPY Random 5-Min", symbol=SYMBOL, initial_cash=BUDGET)
@@ -28,11 +27,6 @@ tracker = PortfolioTracker("spy_rand5", "SPY Random 5-Min", symbol=SYMBOL, initi
 def get_price() -> float:
     quote = stock_data_client.get_stock_latest_quote(StockLatestQuoteRequest(symbol_or_symbols=SYMBOL))
     return float(quote[SYMBOL].ask_price)
-
-
-def is_market_open() -> bool:
-    clock = trading_client.get_clock()
-    return clock.is_open
 
 
 def seconds_until_next_interval() -> float:
@@ -45,42 +39,38 @@ def seconds_until_next_interval() -> float:
 
 def run():
     logger.info("=== SPY Random 5-Min Strategy Starting ===")
+    logger.info(f"Budget: ${BUDGET:.2f} | Cash: ${tracker.get_cash_balance():.2f}")
 
     while True:
         try:
-            if not is_market_open():
-                logger.info("Market closed — waiting")
-                tracker.update_heartbeat()
-                tracker.update_performance(get_price())
-                time.sleep(300)
-                continue
+            pos = tracker.get_position(SYMBOL)
 
             # Close any open position first
-            pos = tracker.get_position(SYMBOL)
             if pos["qty"] > 0:
-                result = tracker.execute_sell(SYMBOL, pos["qty"], trading_client)
-                logger.info(f"CLOSED {result['qty']} @ ${result['price']:,.2f}")
+                logger.info(f"Closing long: {pos['qty']} shares")
+                tracker.execute_sell(SYMBOL, pos["qty"], trading_client)
+            elif pos["qty"] < 0:
+                logger.info(f"Closing short: {abs(pos['qty'])} shares")
+                tracker.close_short(SYMBOL, abs(pos["qty"]), trading_client)
 
-            # Flip a coin: heads = buy, tails = sell
-            buy_signal = random.choice([True, False])
-            cash = tracker.get_cash_balance()
+            # Flip a coin
             price = get_price()
+            cash = tracker.get_cash_balance()
             qty = round(cash / price, 4)
+            buy_signal = random.choice([True, False])
 
             if buy_signal:
-                logger.info("HEADS — buying")
+                logger.info(f"HEADS — buying {qty} SPY @ ${price:.2f}")
                 if qty > 0 and tracker.can_buy(SYMBOL, qty, price):
-                    result = tracker.execute_buy(SYMBOL, qty, trading_client)
-                    logger.info(f"BOUGHT {result['qty']} @ ${result['price']:,.2f}")
+                    tracker.execute_buy(SYMBOL, qty, trading_client)
             else:
-                logger.info("TAILS — selling short")
+                logger.info(f"TAILS — shorting {qty} SPY @ ${price:.2f}")
                 if qty > 0:
-                    result = tracker.execute_sell(SYMBOL, qty, trading_client)
-                    logger.info(f"SHORTED {result['qty']} @ ${result['price']:,.2f}")
+                    tracker.execute_short(SYMBOL, qty, trading_client)
 
             price = get_price()
             pnl = tracker.get_pnl(price)
-            logger.info(f"P&L=${pnl['total']:.2f} ({pnl['pct']:.2f}%)")
+            logger.info(f"Equity=${tracker.get_equity(price):.2f} | P&L=${pnl['total']:.2f} ({pnl['pct']:.2f}%)")
             tracker.update_heartbeat()
             tracker.update_performance(price)
 
