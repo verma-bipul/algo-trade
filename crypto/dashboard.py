@@ -23,26 +23,34 @@ load_dotenv()
 
 STRATEGIES = {
     "buy_and_hold": {
-        "name": "Buy & Hold",
+        "name": "BTC Buy & Hold",
         "description": "Buy $100 of BTC on day one, hold forever. Benchmark.",
     },
     "minute_momentum": {
-        "name": "1-Min Momentum",
+        "name": "BTC 1-Min",
         "description": "Green 1-min candle → buy, hold 1 min, sell. Red → skip.",
     },
     "five_min_momentum": {
-        "name": "5-Min Momentum",
+        "name": "BTC 5-Min",
         "description": "Green 5-min candle → buy, hold 5 min, sell. Red → skip.",
     },
     "thirty_min_momentum": {
-        "name": "30-Min Momentum",
+        "name": "BTC 30-Min",
         "description": "Green 30-min candle → buy, hold 30 min, sell. Red → skip.",
+    },
+    "spy_five_min_momentum": {
+        "name": "SPY 5-Min",
+        "description": "Green 5-min candle → buy, hold 5 min, sell. Market hours only.",
+    },
+    "spy_thirty_min_momentum": {
+        "name": "SPY 30-Min",
+        "description": "Green 30-min candle → buy, hold 30 min, sell. Market hours only.",
     },
 }
 
 # --- Config ---
 
-st.set_page_config(page_title="Crypto Trader", layout="wide")
+st.set_page_config(page_title="Algo Trader", layout="wide")
 
 
 @st.cache_resource
@@ -75,8 +83,8 @@ def get_data():
 
 # --- UI ---
 
-st.title("Crypto Trader")
-st.caption("BTC/USD paper trading strategies — $100 budget each")
+st.title("Algo Trader")
+st.caption("BTC/USD + SPY paper trading strategies — $100 budget each")
 
 try:
     performance, trades = get_data()
@@ -86,10 +94,14 @@ except Exception as e:
 
 perf_by_id = {r["strategy_id"]: r for r in performance}
 
-cols = st.columns(len(STRATEGIES))
+strategy_list = list(STRATEGIES.items())
+COLS_PER_ROW = 3
 
-for i, (strategy_id, info) in enumerate(STRATEGIES.items()):
-    with cols[i]:
+for row_start in range(0, len(strategy_list), COLS_PER_ROW):
+    row_items = strategy_list[row_start:row_start + COLS_PER_ROW]
+    cols = st.columns(COLS_PER_ROW)
+    for i, (strategy_id, info) in enumerate(row_items):
+        with cols[i]:
         st.subheader(info["name"])
         st.caption(info["description"])
 

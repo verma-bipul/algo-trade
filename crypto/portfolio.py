@@ -29,9 +29,10 @@ MAX_TRADES_PER_STRATEGY = 5
 class PortfolioTracker:
     """Tracks a single strategy's cash, positions, and trades via Google Sheets."""
 
-    def __init__(self, strategy_id: str, display_name: str, initial_cash: float = 100.0):
+    def __init__(self, strategy_id: str, display_name: str, symbol: str = "BTC/USD", initial_cash: float = 100.0):
         self.strategy_id = strategy_id
         self.display_name = display_name
+        self.symbol = symbol
         self.initial_cash = initial_cash
 
         # Connect to Google Sheet
@@ -45,7 +46,7 @@ class PortfolioTracker:
 
         logger.info(
             f"[{strategy_id}] Initialized — cash=${self._cash:.2f}, "
-            f"position={self._position['qty']:.8f} BTC"
+            f"position={self._position['qty']}"
         )
 
     def _register_strategy(self):
@@ -68,7 +69,7 @@ class PortfolioTracker:
             for r in records:
                 if r["strategy_id"] == self.strategy_id:
                     self._cash = float(r["cash"])
-                    self._position["qty"] = float(r["btc_qty"])
+                    self._position["qty"] = float(r.get("qty", r.get("btc_qty", 0)))
                     self._position["avg_entry_price"] = float(r["avg_entry_price"])
                     return
         except Exception as e:
@@ -168,15 +169,15 @@ class PortfolioTracker:
             return None
         return self.execute_sell(symbol, self._position["qty"], trading_client)
 
-    def get_equity(self, current_prices: dict) -> float:
-        return self._cash + self._position["qty"] * current_prices.get("BTC/USD", 0)
+    def get_equity(self, price: float) -> float:
+        return self._cash + self._position["qty"] * price
 
-    def get_pnl(self, current_prices: dict) -> dict:
-        equity = self.get_equity(current_prices)
+    def get_pnl(self, price: float) -> dict:
+        equity = self.get_equity(price)
         total = equity - self.initial_cash
         pct = (total / self.initial_cash) * 100
         unrealized = self._position["qty"] * (
-            current_prices.get("BTC/USD", 0) - self._position["avg_entry_price"]
+            price - self._position["avg_entry_price"]
         ) if self._position["qty"] > 0 else 0
         realized = total - unrealized
         return {
@@ -201,19 +202,18 @@ class PortfolioTracker:
         except Exception as e:
             logger.warning(f"Heartbeat update failed: {e}")
 
-    def update_performance(self, btc_price: float):
+    def update_performance(self, price: float):
         """Write current equity/P&L to the performance sheet tab."""
         now = datetime.now(timezone.utc).isoformat()
-        prices = {"BTC/USD": btc_price}
-        equity = self.get_equity(prices)
-        pnl = self.get_pnl(prices)
+        equity = self.get_equity(price)
+        pnl = self.get_pnl(price)
         row = [
             self.strategy_id,
             now,
             round(equity, 2),
             round(self._cash, 2),
             round(self._position["qty"], 8),
-            round(btc_price, 2),
+            round(price, 2),
             pnl["total"],
             pnl["pct"],
         ]

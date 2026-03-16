@@ -20,7 +20,7 @@ BUDGET = 100.0
 INTERVAL = 5  # minutes
 
 logger = get_logger("five_min_momentum")
-tracker = PortfolioTracker("five_min_momentum", "5-Min Momentum BTC", initial_cash=BUDGET)
+tracker = PortfolioTracker("five_min_momentum", "5-Min Momentum BTC", symbol=SYMBOL, initial_cash=BUDGET)
 
 
 def get_btc_price() -> float:
@@ -82,7 +82,7 @@ def run():
                     logger.info(f"BOUGHT {result['qty']:.8f} @ ${result['price']:,.2f}")
 
             price = get_btc_price()
-            pnl = tracker.get_pnl({SYMBOL: price})
+            pnl = tracker.get_pnl(price)
             logger.info(f"P&L=${pnl['total']:.2f} ({pnl['pct']:.2f}%)")
             tracker.update_heartbeat()
             tracker.update_performance(price)

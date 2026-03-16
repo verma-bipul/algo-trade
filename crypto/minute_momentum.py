@@ -23,7 +23,7 @@ SYMBOL = "BTC/USD"
 BUDGET = 100.0
 
 logger = get_logger("minute_momentum")
-tracker = PortfolioTracker("minute_momentum", "1-Min Momentum BTC", initial_cash=BUDGET)
+tracker = PortfolioTracker("minute_momentum", "1-Min Momentum BTC", symbol=SYMBOL, initial_cash=BUDGET)
 
 
 def get_btc_price() -> float:
@@ -118,8 +118,8 @@ def run():
 
             # Log current state + heartbeat
             price = get_btc_price()
-            equity = tracker.get_equity({SYMBOL: price})
-            pnl = tracker.get_pnl({SYMBOL: price})
+            equity = tracker.get_equity(price)
+            pnl = tracker.get_pnl(price)
             logger.info(f"Equity=${equity:.2f} | P&L=${pnl['total']:.2f} ({pnl['pct']:.2f}%)")
             tracker.update_heartbeat()
             tracker.update_performance(price)

@@ -8,7 +8,7 @@ import logging
 from dotenv import load_dotenv
 import gspread
 from alpaca.trading.client import TradingClient
-from alpaca.data.historical import CryptoHistoricalDataClient
+from alpaca.data.historical import CryptoHistoricalDataClient, StockHistoricalDataClient
 
 load_dotenv()
 
@@ -22,6 +22,7 @@ if not API_KEY or not API_SECRET:
 
 trading_client = TradingClient(API_KEY, API_SECRET, paper=(TRADING_ENV != "live"))
 crypto_data_client = CryptoHistoricalDataClient(API_KEY, API_SECRET)
+stock_data_client = StockHistoricalDataClient(API_KEY, API_SECRET)
 
 # --- Google Sheets ---
 GOOGLE_SHEET_ID = os.getenv("GOOGLE_SHEET_ID")
@@ -59,11 +60,11 @@ def _ensure_worksheets(sheet):
 
     if "state" not in existing:
         ws = sheet.add_worksheet("state", rows=10, cols=4)
-        ws.append_row(["strategy_id", "cash", "btc_qty", "avg_entry_price"])
+        ws.append_row(["strategy_id", "cash", "qty", "avg_entry_price"])
 
     if "performance" not in existing:
         ws = sheet.add_worksheet("performance", rows=10, cols=8)
-        ws.append_row(["strategy_id", "last_updated", "equity", "cash", "btc_qty", "btc_price", "pnl_dollar", "pnl_pct"])
+        ws.append_row(["strategy_id", "last_updated", "equity", "cash", "qty", "price", "pnl_dollar", "pnl_pct"])
 
     # Remove default Sheet1 if our sheets were just created
     if "Sheet1" in existing and len(existing) > 1:

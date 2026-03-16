@@ -17,7 +17,7 @@ BUDGET = 100.0
 EQUITY_LOG_INTERVAL = 300  # 5 minutes
 
 logger = get_logger("buy_and_hold")
-tracker = PortfolioTracker("buy_and_hold", "Buy & Hold BTC", initial_cash=BUDGET)
+tracker = PortfolioTracker("buy_and_hold", "Buy & Hold BTC", symbol=SYMBOL, initial_cash=BUDGET)
 
 
 def get_btc_price() -> float:
@@ -51,8 +51,8 @@ def run():
     while True:
         try:
             price = get_btc_price()
-            equity = tracker.get_equity({SYMBOL: price})
-            pnl = tracker.get_pnl({SYMBOL: price})
+            equity = tracker.get_equity(price)
+            pnl = tracker.get_pnl(price)
             logger.info(
                 f"BTC=${price:,.2f} | Equity=${equity:.2f} | P&L=${pnl['total']:.2f} ({pnl['pct']:.2f}%)"
             )
