@@ -48,25 +48,21 @@ def run():
             # Close any open position first
             if pos["qty"] > 0:
                 logger.info(f"Closing long: {pos['qty']} shares")
-                tracker.execute_sell(SYMBOL, pos["qty"], trading_client)
+                tracker.execute_sell(SYMBOL, 1, trading_client)
             elif pos["qty"] < 0:
                 logger.info(f"Closing short: {abs(pos['qty'])} shares")
-                tracker.close_short(SYMBOL, abs(pos["qty"]), trading_client)
+                tracker.close_short(SYMBOL, 1, trading_client)
 
-            # Flip a coin
+            # Flip a coin — buy 1 or sell 1 whole share
             price = get_price()
-            cash = tracker.get_cash_balance()
-            qty = round(cash / price, 4)
             buy_signal = random.choice([True, False])
 
             if buy_signal:
-                logger.info(f"HEADS — buying {qty} SPY @ ${price:.2f}")
-                if qty > 0 and tracker.can_buy(SYMBOL, qty, price):
-                    tracker.execute_buy(SYMBOL, qty, trading_client)
+                logger.info(f"HEADS — buying 1 SPY @ ${price:.2f}")
+                tracker.execute_buy(SYMBOL, 1, trading_client)
             else:
-                logger.info(f"TAILS — shorting {qty} SPY @ ${price:.2f}")
-                if qty > 0:
-                    tracker.execute_short(SYMBOL, qty, trading_client)
+                logger.info(f"TAILS — shorting 1 SPY @ ${price:.2f}")
+                tracker.execute_short(SYMBOL, 1, trading_client)
 
             price = get_price()
             pnl = tracker.get_pnl(price)
