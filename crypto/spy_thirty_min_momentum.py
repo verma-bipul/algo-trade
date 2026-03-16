@@ -4,7 +4,7 @@ SPY 30-Minute Candle Momentum
 Every 30 minutes during market hours:
 - Green candle -> buy, hold 30 min, sell next cycle
 - Red candle -> skip
-- Market closed -> sleep until open
+- Market closed -> sleep 5 min, send heartbeat, check again
 """
 
 import time
@@ -51,13 +51,9 @@ def get_last_candle() -> dict | None:
         return None
 
 
-def wait_for_market():
-    """If market is closed, sleep until it opens."""
+def is_market_open() -> bool:
     clock = trading_client.get_clock()
-    if not clock.is_open:
-        wait = (clock.next_open - clock.timestamp).total_seconds()
-        logger.info(f"Market closed. Sleeping {wait/3600:.1f}h until {clock.next_open}")
-        time.sleep(max(wait, 1))
+    return clock.is_open
 
 
 def seconds_until_next_interval() -> float:
@@ -73,7 +69,12 @@ def run():
 
     while True:
         try:
-            wait_for_market()
+            if not is_market_open():
+                logger.info("Market closed — waiting")
+                tracker.update_heartbeat()
+                tracker.update_performance(get_price())
+                time.sleep(300)
+                continue
 
             pos = tracker.get_position(SYMBOL)
             if pos["qty"] > 0:

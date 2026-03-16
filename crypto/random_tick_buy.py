@@ -2,8 +2,9 @@
 Random Ticker Buy & Hold 30-Min Strategy
 
 Every 30 minutes during market hours:
-- Pick a random stock from the top ~1000 tradeable stocks
+- Pick a random stock from all tradeable stocks
 - Buy it, hold 30 min, sell, repeat
+- Market closed -> sleep 5 min, send heartbeat, check again
 """
 
 import time
@@ -40,14 +41,23 @@ def build_universe():
     _universe = [
         a.symbol for a in assets
         if a.tradable
-        and a.asset_class.value == "us_equity"
-        and a.exchange.value in ("NYSE", "NASDAQ", "AMEX", "ARCA")
+        and str(a.asset_class) == "us_equity"
+        and str(a.exchange) in ("NYSE", "NASDAQ", "AMEX", "ARCA", "BATS")
         and a.fractionable
         and "." not in a.symbol
         and len(a.symbol) <= 5
     ]
     _universe_date = today
     logger.info(f"Universe: {len(_universe)} stocks")
+
+    if not _universe:
+        # Fallback: if filtering returned nothing, try looser filter
+        _universe = [
+            a.symbol for a in assets
+            if a.tradable and a.fractionable and "." not in a.symbol and len(a.symbol) <= 5
+        ]
+        logger.info(f"Universe (fallback): {len(_universe)} stocks")
+
     return _universe
 
 
@@ -56,12 +66,9 @@ def get_price(symbol: str) -> float:
     return float(quote[symbol].ask_price)
 
 
-def wait_for_market():
+def is_market_open() -> bool:
     clock = trading_client.get_clock()
-    if not clock.is_open:
-        wait = (clock.next_open - clock.timestamp).total_seconds()
-        logger.info(f"Market closed. Sleeping {wait/3600:.1f}h until {clock.next_open}")
-        time.sleep(max(wait, 1))
+    return clock.is_open
 
 
 def seconds_until_next_interval() -> float:
@@ -77,8 +84,17 @@ def run():
 
     while True:
         try:
-            wait_for_market()
+            if not is_market_open():
+                logger.info("Market closed — waiting")
+                tracker.update_heartbeat()
+                time.sleep(300)
+                continue
+
             universe = build_universe()
+            if not universe:
+                logger.error("Empty stock universe, retrying next cycle")
+                time.sleep(60)
+                continue
 
             # Sell whatever we're holding
             pos = tracker.get_position("RANDOM")
@@ -103,14 +119,13 @@ def run():
 
                     pnl = tracker.get_pnl(price)
                     logger.info(f"Holding: {stock} | P&L=${pnl['total']:.2f} ({pnl['pct']:.2f}%)")
-                    tracker.update_heartbeat()
                     tracker.update_performance(price)
                 else:
                     logger.warning(f"Cannot buy {stock}: cash=${cash:.2f}, price=${price:.2f}")
             except Exception as e:
                 logger.error(f"Failed to buy {stock}: {e}")
-                # Still update heartbeat even if trade fails
-                tracker.update_heartbeat()
+
+            tracker.update_heartbeat()
 
         except Exception as e:
             logger.error(f"Error in trading loop: {e}", exc_info=True)

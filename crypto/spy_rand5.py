@@ -5,6 +5,7 @@ Every 5 minutes during market hours:
 - Flip a coin
 - Heads -> buy SPY, hold 5 min, sell next cycle
 - Tails -> skip
+- Market closed -> sleep 5 min, send heartbeat, check again
 """
 
 import time
@@ -29,12 +30,9 @@ def get_price() -> float:
     return float(quote[SYMBOL].ask_price)
 
 
-def wait_for_market():
+def is_market_open() -> bool:
     clock = trading_client.get_clock()
-    if not clock.is_open:
-        wait = (clock.next_open - clock.timestamp).total_seconds()
-        logger.info(f"Market closed. Sleeping {wait/3600:.1f}h until {clock.next_open}")
-        time.sleep(max(wait, 1))
+    return clock.is_open
 
 
 def seconds_until_next_interval() -> float:
@@ -50,7 +48,12 @@ def run():
 
     while True:
         try:
-            wait_for_market()
+            if not is_market_open():
+                logger.info("Market closed — waiting")
+                tracker.update_heartbeat()
+                tracker.update_performance(get_price())
+                time.sleep(300)
+                continue
 
             # Sell if holding
             pos = tracker.get_position(SYMBOL)
