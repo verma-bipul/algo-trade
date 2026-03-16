@@ -22,25 +22,9 @@ load_dotenv()
 # used in portfolio.py on the Pi.
 
 STRATEGIES = {
-    "buy_and_hold": {
-        "name": "BTC Buy & Hold",
-        "description": "Buy $100 of BTC on day one, hold forever. Benchmark.",
-    },
-    "minute_momentum": {
-        "name": "BTC 1-Min",
-        "description": "Green 1-min candle → buy, hold 1 min, sell. Red → skip.",
-    },
     "minute_momentum_inv": {
         "name": "BTC 1-Min Inv",
-        "description": "Red 1-min candle → buy (mean reversion). Green → skip. Inverse of BTC 1-Min.",
-    },
-    "five_min_momentum": {
-        "name": "BTC 5-Min",
-        "description": "Green 5-min candle → buy, hold 5 min, sell. Red → skip.",
-    },
-    "thirty_min_momentum": {
-        "name": "BTC 30-Min",
-        "description": "Green 30-min candle → buy, hold 30 min, sell. Red → skip.",
+        "description": "Red 1-min candle → buy (mean reversion). Green → skip.",
     },
     "spy_rand5": {
         "name": "SPY Random 5-Min",
