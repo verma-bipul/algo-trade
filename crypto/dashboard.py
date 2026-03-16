@@ -38,21 +38,9 @@ STRATEGIES = {
         "name": "BTC 30-Min",
         "description": "Green 30-min candle → buy, hold 30 min, sell. Red → skip.",
     },
-    "spy_five_min_momentum": {
-        "name": "SPY 5-Min",
-        "description": "Green 5-min candle → buy, hold 5 min, sell. Market hours only.",
-    },
-    "spy_thirty_min_momentum": {
-        "name": "SPY 30-Min",
-        "description": "Green 30-min candle → buy, hold 30 min, sell. Market hours only.",
-    },
-    "spy_rand5": {
-        "name": "SPY Random",
-        "description": "Flip a coin every 5 min. Heads → buy SPY, hold 5 min, sell. Tails → skip.",
-    },
-    "random_tick_buy": {
-        "name": "Random Ticker",
-        "description": "Pick a random stock, buy $100, hold 30 min, sell. Repeat.",
+    "spy_rand1": {
+        "name": "SPY Random 1-Min",
+        "description": "Flip a coin every 1 min. Heads → buy SPY, hold 1 min, sell. Tails → skip. Market hours only.",
     },
 }
 

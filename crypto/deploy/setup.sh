@@ -9,7 +9,7 @@ set -euo pipefail
 REPO_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 VENV_DIR="$REPO_DIR/.venv"
 CURRENT_USER="$(whoami)"
-SERVICES=("buy_and_hold" "minute_momentum" "five_min_momentum" "thirty_min_momentum" "spy_five_min_momentum" "spy_thirty_min_momentum" "spy_rand5" "random_tick_buy")
+SERVICES=("buy_and_hold" "minute_momentum" "five_min_momentum" "thirty_min_momentum" "spy_rand1")
 
 echo "=== Crypto Trader Pi Setup ==="
 echo "Directory: $REPO_DIR"
