@@ -10,6 +10,7 @@ Every 30 minutes during market hours:
 """
 
 import time
+import math
 from datetime import datetime, timezone, timedelta
 
 from alpaca.data.requests import StockBarsRequest, StockLatestQuoteRequest
@@ -90,7 +91,7 @@ def run():
                 is_green = candle["close"] > candle["open"]
                 cash = tracker.get_cash_balance()
                 price = get_price()
-                qty = round(cash / price, 4)
+                qty = math.floor(cash / price * 10000) / 10000
                 if is_green:
                     logger.info("GREEN — buying")
                     if qty > 0 and tracker.can_buy(SYMBOL, qty, price):

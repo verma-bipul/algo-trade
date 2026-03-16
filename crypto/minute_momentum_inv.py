@@ -8,6 +8,7 @@ Every minute:
 """
 
 import time
+import math
 from datetime import datetime, timezone, timedelta
 
 from alpaca.data.requests import CryptoBarsRequest, CryptoLatestQuoteRequest
@@ -102,7 +103,7 @@ def run():
                 if not is_green:
                     cash = tracker.get_cash_balance()
                     price = get_btc_price()
-                    qty = round(cash / price, 8)
+                    qty = math.floor(cash / price * 1e8) / 1e8
 
                     if qty > 0 and tracker.can_buy(SYMBOL, qty, price):
                         logger.info(f"RED signal — buying {qty:.8f} BTC (mean reversion)")

@@ -7,6 +7,7 @@ Every 5 minutes:
 """
 
 import time
+import math
 from datetime import datetime, timezone, timedelta
 
 from alpaca.data.requests import CryptoBarsRequest, CryptoLatestQuoteRequest
@@ -76,7 +77,7 @@ def run():
             if candle and candle["close"] > candle["open"]:
                 cash = tracker.get_cash_balance()
                 price = get_btc_price()
-                qty = round(cash / price, 8)
+                qty = math.floor(cash / price * 1e8) / 1e8
                 if qty > 0 and tracker.can_buy(SYMBOL, qty, price):
                     result = tracker.execute_buy(SYMBOL, qty, trading_client)
                     logger.info(f"BOUGHT {result['qty']:.8f} @ ${result['price']:,.2f}")
