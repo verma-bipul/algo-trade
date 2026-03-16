@@ -8,6 +8,7 @@ Every 5 minutes:
 """
 
 import time
+import math
 import random
 from datetime import datetime, timezone, timedelta
 
@@ -59,15 +60,18 @@ def run():
             try:
                 cash = tracker.get_cash_balance()
                 price = get_price(stock)
-                qty = round(cash / price, 4)
 
-                if qty > 0 and tracker.can_buy(stock, qty, price):
-                    logger.info(f"Buying {qty} {stock} @ ${price:.2f}")
-                    result = tracker.execute_buy(stock, qty, trading_client)
-                    logger.info(f"BOUGHT {stock} {result['qty']} @ ${result['price']:,.2f}")
-                    tracker.update_performance(price)
+                if price <= 0:
+                    logger.warning(f"{stock} has no price, skipping")
                 else:
-                    logger.warning(f"Cannot buy {stock}: cash=${cash:.2f}, price=${price:.2f}")
+                    qty = math.floor(cash / price * 10000) / 10000  # round DOWN
+                    if qty > 0 and tracker.can_buy(stock, qty, price):
+                        logger.info(f"Buying {qty} {stock} @ ${price:.2f}")
+                        result = tracker.execute_buy(stock, qty, trading_client)
+                        logger.info(f"BOUGHT {stock} {result['qty']} @ ${result['price']:,.2f}")
+                        tracker.update_performance(price)
+                    else:
+                        logger.warning(f"Cannot buy {stock}: cash=${cash:.2f}, price=${price:.2f}")
             except Exception as e:
                 logger.error(f"Failed on {stock}: {e}")
 
