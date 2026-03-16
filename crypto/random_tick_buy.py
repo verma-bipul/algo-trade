@@ -1,11 +1,10 @@
 """
-Random Ticker Buy & Hold 30-Min Strategy
+Random Ticker 5-Minute Strategy
 
-Every 30 minutes during market hours:
+Every 5 minutes:
 - Close any open position
-- Pick a random stock from preprocessed universe (~6000 stocks)
-- Buy it, hold 30 min, close, repeat
-- Market closed -> sleep 5 min, send heartbeat, check again
+- Pick a random stock from top 1000 by volume
+- Buy with available cash, hold 5 min, close, repeat
 """
 
 import time
@@ -19,10 +18,10 @@ from portfolio import PortfolioTracker
 from stock_universe import UNIVERSE
 
 BUDGET = 100.0
-INTERVAL = 30  # minutes
+INTERVAL = 5
 
 logger = get_logger("random_tick_buy")
-tracker = PortfolioTracker("random_tick_buy", "Random Ticker 30-Min", symbol="RANDOM", initial_cash=BUDGET)
+tracker = PortfolioTracker("random_tick_buy", "Random Ticker 5-Min", symbol="RANDOM", initial_cash=BUDGET)
 
 logger.info(f"Stock universe: {len(UNIVERSE)} symbols")
 
@@ -30,11 +29,6 @@ logger.info(f"Stock universe: {len(UNIVERSE)} symbols")
 def get_price(symbol: str) -> float:
     quote = stock_data_client.get_stock_latest_quote(StockLatestQuoteRequest(symbol_or_symbols=symbol))
     return float(quote[symbol].ask_price)
-
-
-def is_market_open() -> bool:
-    clock = trading_client.get_clock()
-    return clock.is_open
 
 
 def seconds_until_next_interval() -> float:
@@ -46,23 +40,17 @@ def seconds_until_next_interval() -> float:
 
 
 def run():
-    logger.info("=== Random Ticker 30-Min Strategy Starting ===")
+    logger.info("=== Random Ticker 5-Min Strategy Starting ===")
 
     while True:
         try:
-            if not is_market_open():
-                logger.info("Market closed — waiting")
-                tracker.update_heartbeat()
-                time.sleep(300)
-                continue
-
-            # Sell whatever we're holding
+            # Close whatever we're holding
             pos = tracker.get_position("RANDOM")
             held = tracker.get_held_symbol()
             if pos["qty"] > 0 and held and held != "RANDOM":
                 try:
-                    result = tracker.execute_sell(held, pos["qty"], trading_client)
-                    logger.info(f"SOLD {held} {result['qty']} @ ${result['price']:,.2f}")
+                    logger.info(f"Closing {held}: {pos['qty']} shares")
+                    tracker.execute_sell(held, pos["qty"], trading_client)
                 except Exception as e:
                     logger.error(f"Failed to sell {held}: {e}")
 
@@ -74,13 +62,14 @@ def run():
                 qty = round(cash / price, 4)
 
                 if qty > 0 and tracker.can_buy(stock, qty, price):
+                    logger.info(f"Buying {qty} {stock} @ ${price:.2f}")
                     result = tracker.execute_buy(stock, qty, trading_client)
                     logger.info(f"BOUGHT {stock} {result['qty']} @ ${result['price']:,.2f}")
                     tracker.update_performance(price)
                 else:
                     logger.warning(f"Cannot buy {stock}: cash=${cash:.2f}, price=${price:.2f}")
             except Exception as e:
-                logger.error(f"Failed to buy {stock}: {e}")
+                logger.error(f"Failed on {stock}: {e}")
 
             tracker.update_heartbeat()
 

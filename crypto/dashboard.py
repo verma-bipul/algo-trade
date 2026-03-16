@@ -42,6 +42,10 @@ STRATEGIES = {
         "name": "SPY Random 5-Min",
         "description": "Flip a coin every 5 min. Heads → buy, Tails → short. Close and repeat.",
     },
+    "random_tick_buy": {
+        "name": "Random Ticker 5-Min",
+        "description": "Pick a random stock from top 1000, buy $100, hold 5 min, sell. Repeat.",
+    },
 }
 
 # --- Config ---
