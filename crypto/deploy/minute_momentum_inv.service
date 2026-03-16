@@ -1,0 +1,17 @@
+[Unit]
+Description=BTC 1-Min Inverse Momentum Strategy
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=pi
+WorkingDirectory=/home/pi/algo-trade/crypto
+ExecStart=/home/pi/algo-trade/crypto/.venv/bin/python minute_momentum_inv.py
+Restart=on-failure
+RestartSec=30
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

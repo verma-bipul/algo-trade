@@ -30,6 +30,10 @@ STRATEGIES = {
         "name": "BTC 1-Min",
         "description": "Green 1-min candle → buy, hold 1 min, sell. Red → skip.",
     },
+    "minute_momentum_inv": {
+        "name": "BTC 1-Min Inv",
+        "description": "Red 1-min candle → buy (mean reversion). Green → skip. Inverse of BTC 1-Min.",
+    },
     "five_min_momentum": {
         "name": "BTC 5-Min",
         "description": "Green 5-min candle → buy, hold 5 min, sell. Red → skip.",
