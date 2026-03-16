@@ -10,7 +10,7 @@ import time
 from datetime import datetime, timezone, timedelta
 
 from alpaca.data.requests import CryptoBarsRequest, CryptoLatestQuoteRequest
-from alpaca.data.timeframe import TimeFrame
+from alpaca.data.timeframe import TimeFrame, TimeFrameUnit
 
 from config import trading_client, crypto_data_client, get_logger
 from portfolio import PortfolioTracker
@@ -35,7 +35,7 @@ def get_last_candle() -> dict | None:
         bars = crypto_data_client.get_crypto_bars(
             CryptoBarsRequest(
                 symbol_or_symbols=SYMBOL,
-                timeframe=TimeFrame(amount=INTERVAL, unit="Min"),
+                timeframe=TimeFrame(amount=INTERVAL, unit=TimeFrameUnit.Minute),
                 start=start,
                 end=now - timedelta(seconds=30),
             )
