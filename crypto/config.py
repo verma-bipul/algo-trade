@@ -60,7 +60,7 @@ def _ensure_worksheets(sheet):
 
     if "state" not in existing:
         ws = sheet.add_worksheet("state", rows=10, cols=4)
-        ws.append_row(["strategy_id", "cash", "qty", "avg_entry_price"])
+        ws.append_row(["strategy_id", "cash", "qty", "avg_entry_price", "held_symbol"])
 
     if "performance" not in existing:
         ws = sheet.add_worksheet("performance", rows=10, cols=8)

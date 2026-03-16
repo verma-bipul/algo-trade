@@ -46,6 +46,14 @@ STRATEGIES = {
         "name": "SPY 30-Min",
         "description": "Green 30-min candle → buy, hold 30 min, sell. Market hours only.",
     },
+    "spy_rand5": {
+        "name": "SPY Random",
+        "description": "Flip a coin every 5 min. Heads → buy SPY, hold 5 min, sell. Tails → skip.",
+    },
+    "random_tick_buy": {
+        "name": "Random Ticker",
+        "description": "Pick a random stock, buy $100, hold 30 min, sell. Repeat.",
+    },
 }
 
 # --- Config ---

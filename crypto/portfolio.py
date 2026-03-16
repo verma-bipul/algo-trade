@@ -42,6 +42,7 @@ class PortfolioTracker:
         # Load state from the "state" tab (not by replaying trades)
         self._cash = initial_cash
         self._position = {"qty": 0.0, "avg_entry_price": 0.0}
+        self._held_symbol = symbol
         self._load_state()
 
         logger.info(
@@ -71,25 +72,32 @@ class PortfolioTracker:
                     self._cash = float(r["cash"])
                     self._position["qty"] = float(r.get("qty", r.get("btc_qty", 0)))
                     self._position["avg_entry_price"] = float(r["avg_entry_price"])
+                    self._held_symbol = str(r.get("held_symbol", self.symbol)) or self.symbol
                     return
         except Exception as e:
             logger.warning(f"Could not load state: {e}")
         # No saved state found — keep defaults (initial_cash, no position)
 
-    def _save_state(self):
+    def get_held_symbol(self) -> str:
+        """Which symbol is currently held (matters for multi-symbol strategies)."""
+        return self._held_symbol
+
+    def _save_state(self, held_symbol: str | None = None):
         """Persist current cash and position to the state tab."""
+        self._held_symbol = held_symbol or self.symbol
         row = [
             self.strategy_id,
             round(self._cash, 6),
             round(self._position["qty"], 8),
             round(self._position["avg_entry_price"], 2),
+            self._held_symbol,
         ]
         try:
             ws = self.sheet.worksheet("state")
             records = ws.get_all_records()
             for i, r in enumerate(records):
                 if r["strategy_id"] == self.strategy_id:
-                    ws.update(f"A{i+2}:D{i+2}", [row])
+                    ws.update(f"A{i+2}:E{i+2}", [row])
                     return
             # Not found — add new row
             ws.append_row(row)
@@ -131,7 +139,7 @@ class PortfolioTracker:
 
         # Persist to Google Sheet
         self._append_trade(symbol, "BUY", fill_qty, fill_price, str(order.id))
-        self._save_state()
+        self._save_state(held_symbol=symbol)
         logger.info(f"[{self.strategy_id}] BOUGHT {fill_qty:.8f} {symbol} @ ${fill_price:,.2f}")
 
         return {"qty": fill_qty, "price": fill_price, "order_id": str(order.id)}
@@ -158,7 +166,7 @@ class PortfolioTracker:
 
         # Persist to Google Sheet
         self._append_trade(symbol, "SELL", fill_qty, fill_price, str(order.id))
-        self._save_state()
+        self._save_state(held_symbol=symbol)
         logger.info(f"[{self.strategy_id}] SOLD {fill_qty:.8f} {symbol} @ ${fill_price:,.2f}")
 
         return {"qty": fill_qty, "price": fill_price, "order_id": str(order.id)}
