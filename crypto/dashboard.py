@@ -126,7 +126,7 @@ for row_start in range(0, len(strategy_list), COLS_PER_ROW):
                 if my_trades:
                     st.caption("Recent trades:")
                     for t in my_trades:
-                        st.text(f"  {t['side']} @ ${float(t['price']):,.2f}")
+                        st.text(f"  {t['side']} {t['symbol']} @ ${float(t['price']):,.2f}")
 
                 st.caption(f"Updated: {str(perf['last_updated'])[:16]} UTC")
             else:
