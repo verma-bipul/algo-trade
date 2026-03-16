@@ -2,8 +2,9 @@
 Random Ticker Buy & Hold 30-Min Strategy
 
 Every 30 minutes during market hours:
-- Pick a random stock from all tradeable stocks
-- Buy it, hold 30 min, sell, repeat
+- Close any open position
+- Pick a random stock from preprocessed universe (~6000 stocks)
+- Buy it, hold 30 min, close, repeat
 - Market closed -> sleep 5 min, send heartbeat, check again
 """
 
@@ -12,11 +13,10 @@ import random
 from datetime import datetime, timezone, timedelta
 
 from alpaca.data.requests import StockLatestQuoteRequest
-from alpaca.trading.requests import GetAssetsRequest
-from alpaca.trading.enums import AssetStatus
 
 from config import trading_client, stock_data_client, get_logger
 from portfolio import PortfolioTracker
+from stock_universe import UNIVERSE
 
 BUDGET = 100.0
 INTERVAL = 30  # minutes
@@ -24,41 +24,7 @@ INTERVAL = 30  # minutes
 logger = get_logger("random_tick_buy")
 tracker = PortfolioTracker("random_tick_buy", "Random Ticker 30-Min", symbol="RANDOM", initial_cash=BUDGET)
 
-# Stock universe — built on startup, refreshed daily
-_universe = []
-_universe_date = None
-
-
-def build_universe():
-    """Get tradeable US equities from major exchanges."""
-    global _universe, _universe_date
-    today = datetime.now(timezone.utc).date()
-    if _universe and _universe_date == today:
-        return _universe
-
-    logger.info("Building stock universe...")
-    assets = trading_client.get_all_assets(GetAssetsRequest(status=AssetStatus.ACTIVE))
-    _universe = [
-        a.symbol for a in assets
-        if a.tradable
-        and str(a.asset_class) == "us_equity"
-        and str(a.exchange) in ("NYSE", "NASDAQ", "AMEX", "ARCA", "BATS")
-        and a.fractionable
-        and "." not in a.symbol
-        and len(a.symbol) <= 5
-    ]
-    _universe_date = today
-    logger.info(f"Universe: {len(_universe)} stocks")
-
-    if not _universe:
-        # Fallback: if filtering returned nothing, try looser filter
-        _universe = [
-            a.symbol for a in assets
-            if a.tradable and a.fractionable and "." not in a.symbol and len(a.symbol) <= 5
-        ]
-        logger.info(f"Universe (fallback): {len(_universe)} stocks")
-
-    return _universe
+logger.info(f"Stock universe: {len(UNIVERSE)} symbols")
 
 
 def get_price(symbol: str) -> float:
@@ -90,12 +56,6 @@ def run():
                 time.sleep(300)
                 continue
 
-            universe = build_universe()
-            if not universe:
-                logger.error("Empty stock universe, retrying next cycle")
-                time.sleep(60)
-                continue
-
             # Sell whatever we're holding
             pos = tracker.get_position("RANDOM")
             held = tracker.get_held_symbol()
@@ -107,7 +67,7 @@ def run():
                     logger.error(f"Failed to sell {held}: {e}")
 
             # Pick random stock and buy
-            stock = random.choice(universe)
+            stock = random.choice(UNIVERSE)
             try:
                 cash = tracker.get_cash_balance()
                 price = get_price(stock)
@@ -116,9 +76,6 @@ def run():
                 if qty > 0 and tracker.can_buy(stock, qty, price):
                     result = tracker.execute_buy(stock, qty, trading_client)
                     logger.info(f"BOUGHT {stock} {result['qty']} @ ${result['price']:,.2f}")
-
-                    pnl = tracker.get_pnl(price)
-                    logger.info(f"Holding: {stock} | P&L=${pnl['total']:.2f} ({pnl['pct']:.2f}%)")
                     tracker.update_performance(price)
                 else:
                     logger.warning(f"Cannot buy {stock}: cash=${cash:.2f}, price=${price:.2f}")

@@ -2,9 +2,9 @@
 SPY Random 5-Minute Strategy
 
 Every 5 minutes during market hours:
-- Flip a coin
-- Heads -> buy SPY, hold 5 min, sell next cycle
-- Tails -> skip
+- Close any open position
+- Flip a coin: heads -> buy, tails -> sell (short)
+- Hold 5 min, close, repeat
 - Market closed -> sleep 5 min, send heartbeat, check again
 """
 
@@ -55,23 +55,28 @@ def run():
                 time.sleep(300)
                 continue
 
-            # Sell if holding
+            # Close any open position first
             pos = tracker.get_position(SYMBOL)
             if pos["qty"] > 0:
                 result = tracker.execute_sell(SYMBOL, pos["qty"], trading_client)
-                logger.info(f"SOLD {result['qty']} @ ${result['price']:,.2f}")
+                logger.info(f"CLOSED {result['qty']} @ ${result['price']:,.2f}")
 
-            # Flip a coin
+            # Flip a coin: heads = buy, tails = sell
             buy_signal = random.choice([True, False])
-            logger.info(f"Coin flip: {'HEADS (buy)' if buy_signal else 'TAILS (skip)'}")
+            cash = tracker.get_cash_balance()
+            price = get_price()
+            qty = round(cash / price, 4)
 
             if buy_signal:
-                cash = tracker.get_cash_balance()
-                price = get_price()
-                qty = round(cash / price, 4)
+                logger.info("HEADS — buying")
                 if qty > 0 and tracker.can_buy(SYMBOL, qty, price):
                     result = tracker.execute_buy(SYMBOL, qty, trading_client)
                     logger.info(f"BOUGHT {result['qty']} @ ${result['price']:,.2f}")
+            else:
+                logger.info("TAILS — selling short")
+                if qty > 0:
+                    result = tracker.execute_sell(SYMBOL, qty, trading_client)
+                    logger.info(f"SHORTED {result['qty']} @ ${result['price']:,.2f}")
 
             price = get_price()
             pnl = tracker.get_pnl(price)

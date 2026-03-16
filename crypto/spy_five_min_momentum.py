@@ -2,8 +2,10 @@
 SPY 5-Minute Candle Momentum
 
 Every 5 minutes during market hours:
-- Green candle -> buy, hold 5 min, sell next cycle
-- Red candle -> skip
+- Close any open position
+- Green candle -> buy
+- Red candle -> sell (short)
+- Hold 5 min, close, repeat
 - Market closed -> sleep 5 min, send heartbeat, check again
 """
 
@@ -76,19 +78,29 @@ def run():
                 time.sleep(300)
                 continue
 
+            # Close any open position first
             pos = tracker.get_position(SYMBOL)
             if pos["qty"] > 0:
                 result = tracker.execute_sell(SYMBOL, pos["qty"], trading_client)
-                logger.info(f"SOLD {result['qty']} @ ${result['price']:,.2f}")
+                logger.info(f"CLOSED {result['qty']} @ ${result['price']:,.2f}")
 
+            # Green = buy, Red = sell
             candle = get_last_candle()
-            if candle and candle["close"] > candle["open"]:
+            if candle:
+                is_green = candle["close"] > candle["open"]
                 cash = tracker.get_cash_balance()
                 price = get_price()
                 qty = round(cash / price, 4)
-                if qty > 0 and tracker.can_buy(SYMBOL, qty, price):
-                    result = tracker.execute_buy(SYMBOL, qty, trading_client)
-                    logger.info(f"BOUGHT {result['qty']} @ ${result['price']:,.2f}")
+                if is_green:
+                    logger.info("GREEN — buying")
+                    if qty > 0 and tracker.can_buy(SYMBOL, qty, price):
+                        result = tracker.execute_buy(SYMBOL, qty, trading_client)
+                        logger.info(f"BOUGHT {result['qty']} @ ${result['price']:,.2f}")
+                else:
+                    logger.info("RED — selling short")
+                    if qty > 0:
+                        result = tracker.execute_sell(SYMBOL, qty, trading_client)
+                        logger.info(f"SHORTED {result['qty']} @ ${result['price']:,.2f}")
 
             price = get_price()
             pnl = tracker.get_pnl(price)
