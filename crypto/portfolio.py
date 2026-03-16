@@ -148,6 +148,55 @@ class PortfolioTracker:
 
         return {"qty": fill_qty, "price": fill_price, "order_id": str(order.id)}
 
+    def execute_short(self, symbol: str, qty: float, trading_client) -> dict:
+        """Submit a short sell (sell shares we don't own). Tracker goes negative."""
+        logger.info(f"[{self.strategy_id}] Submitting SHORT {qty:.8f} {symbol}")
+
+        order = trading_client.submit_order(
+            MarketOrderRequest(
+                symbol=symbol, qty=qty, side=OrderSide.SELL, time_in_force=self._tif(symbol),
+            )
+        )
+
+        filled = self._wait_for_fill(order.id, trading_client)
+        fill_price = float(filled.filled_avg_price)
+        fill_qty = float(filled.filled_qty)
+
+        # Track as negative position
+        self._position["qty"] = -fill_qty
+        self._position["avg_entry_price"] = fill_price
+        self._cash += fill_qty * fill_price
+
+        self._append_trade(symbol, "SHORT", fill_qty, fill_price, str(order.id))
+        self._save_state(held_symbol=symbol)
+        logger.info(f"[{self.strategy_id}] SHORTED {fill_qty:.8f} {symbol} @ ${fill_price:,.2f}")
+
+        return {"qty": fill_qty, "price": fill_price, "order_id": str(order.id)}
+
+    def close_short(self, symbol: str, qty: float, trading_client) -> dict:
+        """Buy to cover a short position."""
+        logger.info(f"[{self.strategy_id}] Submitting BUY TO COVER {qty:.8f} {symbol}")
+
+        order = trading_client.submit_order(
+            MarketOrderRequest(
+                symbol=symbol, qty=qty, side=OrderSide.BUY, time_in_force=self._tif(symbol),
+            )
+        )
+
+        filled = self._wait_for_fill(order.id, trading_client)
+        fill_price = float(filled.filled_avg_price)
+        fill_qty = float(filled.filled_qty)
+
+        self._position["qty"] = 0
+        self._position["avg_entry_price"] = 0
+        self._cash -= fill_qty * fill_price
+
+        self._append_trade(symbol, "COVER", fill_qty, fill_price, str(order.id))
+        self._save_state(held_symbol=symbol)
+        logger.info(f"[{self.strategy_id}] COVERED {fill_qty:.8f} {symbol} @ ${fill_price:,.2f}")
+
+        return {"qty": fill_qty, "price": fill_price, "order_id": str(order.id)}
+
     def execute_sell(self, symbol: str, qty: float, trading_client) -> dict:
         """Submit a real Alpaca sell order, record at fill price."""
         logger.info(f"[{self.strategy_id}] Submitting SELL {qty:.8f} {symbol}")
@@ -190,7 +239,7 @@ class PortfolioTracker:
         pct = (total / self.initial_cash) * 100
         unrealized = self._position["qty"] * (
             price - self._position["avg_entry_price"]
-        ) if self._position["qty"] > 0 else 0
+        ) if self._position["qty"] != 0 else 0
         realized = total - unrealized
         return {
             "realized": round(realized, 2),

@@ -39,8 +39,8 @@ STRATEGIES = {
         "description": "Green 30-min candle → buy, hold 30 min, sell. Red → skip.",
     },
     "spy_rand1": {
-        "name": "SPY Random 1-Min",
-        "description": "Flip a coin every 1 min. Heads → buy SPY, hold 1 min, sell. Tails → skip. Market hours only.",
+        "name": "SPY Random 5-Min",
+        "description": "Flip a coin every 5 min. Heads → buy, Tails → short. Close and repeat.",
     },
 }
 
