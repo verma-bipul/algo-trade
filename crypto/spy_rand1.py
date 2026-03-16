@@ -1,11 +1,10 @@
 """
 SPY Random 1-Minute Strategy
 
-Every 1 minute during market hours:
+Every 1 minute:
 - If holding, sell (close position)
 - Flip a coin: heads -> buy, tails -> skip
 - Hold 1 min, repeat
-- Market closed -> sleep 5 min, check again
 """
 
 import time
@@ -13,6 +12,8 @@ import random
 from datetime import datetime, timezone, timedelta
 
 from alpaca.data.requests import StockLatestQuoteRequest
+from alpaca.trading.requests import MarketOrderRequest
+from alpaca.trading.enums import OrderSide, TimeInForce
 
 from config import trading_client, stock_data_client, get_logger
 from portfolio import PortfolioTracker
@@ -26,12 +27,9 @@ tracker = PortfolioTracker("spy_rand1", "SPY Random 1-Min", symbol=SYMBOL, initi
 
 def get_price() -> float:
     quote = stock_data_client.get_stock_latest_quote(StockLatestQuoteRequest(symbol_or_symbols=SYMBOL))
-    return float(quote[SYMBOL].ask_price)
-
-
-def is_market_open() -> bool:
-    clock = trading_client.get_clock()
-    return clock.is_open
+    price = float(quote[SYMBOL].ask_price)
+    logger.info(f"SPY price: ${price:.2f}")
+    return price
 
 
 def seconds_until_next_minute() -> float:
@@ -43,18 +41,14 @@ def seconds_until_next_minute() -> float:
 
 def run():
     logger.info("=== SPY Random 1-Min Strategy Starting ===")
+    logger.info(f"Budget: ${BUDGET:.2f} | Cash: ${tracker.get_cash_balance():.2f}")
 
     while True:
         try:
-            if not is_market_open():
-                logger.info("Market closed — waiting")
-                tracker.update_heartbeat()
-                time.sleep(300)
-                continue
-
             # Close any open position
             pos = tracker.get_position(SYMBOL)
             if pos["qty"] > 0:
+                logger.info(f"Closing position: {pos['qty']} shares")
                 result = tracker.execute_sell(SYMBOL, pos["qty"], trading_client)
                 logger.info(f"SOLD {result['qty']} @ ${result['price']:,.2f}")
 
@@ -62,19 +56,22 @@ def run():
             buy_signal = random.choice([True, False])
 
             if buy_signal:
-                logger.info("HEADS — buying")
                 cash = tracker.get_cash_balance()
                 price = get_price()
                 qty = round(cash / price, 4)
+                logger.info(f"HEADS — buying {qty} SPY (cash=${cash:.2f}, price=${price:.2f})")
+
                 if qty > 0 and tracker.can_buy(SYMBOL, qty, price):
                     result = tracker.execute_buy(SYMBOL, qty, trading_client)
                     logger.info(f"BOUGHT {result['qty']} @ ${result['price']:,.2f}")
+                else:
+                    logger.warning(f"Cannot buy: qty={qty}, cash=${cash:.2f}")
             else:
                 logger.info("TAILS — skip")
 
             price = get_price()
             pnl = tracker.get_pnl(price)
-            logger.info(f"P&L=${pnl['total']:.2f} ({pnl['pct']:.2f}%)")
+            logger.info(f"Equity=${tracker.get_equity(price):.2f} | P&L=${pnl['total']:.2f} ({pnl['pct']:.2f}%)")
             tracker.update_heartbeat()
             tracker.update_performance(price)
 
