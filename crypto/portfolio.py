@@ -201,11 +201,24 @@ class PortfolioTracker:
         """Submit a real Alpaca sell order, record at fill price."""
         logger.info(f"[{self.strategy_id}] Submitting SELL {qty:.8f} {symbol}")
 
-        order = trading_client.submit_order(
-            MarketOrderRequest(
-                symbol=symbol, qty=qty, side=OrderSide.SELL, time_in_force=self._tif(symbol),
+        try:
+            order = trading_client.submit_order(
+                MarketOrderRequest(
+                    symbol=symbol, qty=qty, side=OrderSide.SELL, time_in_force=self._tif(symbol),
+                )
             )
-        )
+        except Exception as e:
+            if "insufficient balance" in str(e):
+                # Retry with slightly less qty (Alpaca balance < tracker qty)
+                reduced_qty = round(qty * 0.999, 8)
+                logger.warning(f"[{self.strategy_id}] Retrying sell with reduced qty {reduced_qty:.8f}")
+                order = trading_client.submit_order(
+                    MarketOrderRequest(
+                        symbol=symbol, qty=reduced_qty, side=OrderSide.SELL, time_in_force=self._tif(symbol),
+                    )
+                )
+            else:
+                raise
 
         filled = self._wait_for_fill(order.id, trading_client)
         fill_price = float(filled.filled_avg_price)
