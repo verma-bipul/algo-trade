@@ -210,7 +210,7 @@ class PortfolioTracker:
         except Exception as e:
             if "insufficient balance" in str(e):
                 # Retry with slightly less qty (Alpaca balance < tracker qty)
-                reduced_qty = round(qty * 0.999, 8)
+                reduced_qty = round(qty * 0.99, 8)
                 logger.warning(f"[{self.strategy_id}] Retrying sell with reduced qty {reduced_qty:.8f}")
                 order = trading_client.submit_order(
                     MarketOrderRequest(
