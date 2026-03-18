@@ -198,44 +198,38 @@ class PortfolioTracker:
         return {"qty": fill_qty, "price": fill_price, "order_id": str(order.id)}
 
     def execute_sell(self, symbol: str, qty: float, trading_client) -> dict:
-        """Submit a real Alpaca sell order, record at fill price."""
-        logger.info(f"[{self.strategy_id}] Submitting SELL {qty:.8f} {symbol}")
+        """Close position via Alpaca's close_position API — avoids qty mismatch."""
+        logger.info(f"[{self.strategy_id}] Closing position in {symbol}")
 
         try:
-            order = trading_client.submit_order(
-                MarketOrderRequest(
-                    symbol=symbol, qty=qty, side=OrderSide.SELL, time_in_force=self._tif(symbol),
-                )
-            )
+            # Use close_position — sells whatever Alpaca actually has
+            close_response = trading_client.close_position(symbol)
+            order_id = str(close_response.id)
+            filled = self._wait_for_fill(order_id, trading_client)
         except Exception as e:
-            if "insufficient balance" in str(e):
-                # Retry with slightly less qty (Alpaca balance < tracker qty)
-                reduced_qty = round(qty * 0.99, 8)
-                logger.warning(f"[{self.strategy_id}] Retrying sell with reduced qty {reduced_qty:.8f}")
-                order = trading_client.submit_order(
-                    MarketOrderRequest(
-                        symbol=symbol, qty=reduced_qty, side=OrderSide.SELL, time_in_force=self._tif(symbol),
-                    )
-                )
-            else:
-                raise
+            if "404" in str(e) or "not found" in str(e).lower():
+                # No position in Alpaca — just reset tracker
+                logger.warning(f"[{self.strategy_id}] No Alpaca position for {symbol}, resetting tracker")
+                self._position["qty"] = 0
+                self._position["avg_entry_price"] = 0
+                self._save_state(held_symbol=symbol)
+                return {"qty": 0, "price": 0, "order_id": "none"}
+            raise
 
-        filled = self._wait_for_fill(order.id, trading_client)
         fill_price = float(filled.filled_avg_price)
         fill_qty = float(filled.filled_qty)
 
         # Update in-memory state
-        self._position["qty"] = max(self._position["qty"] - fill_qty, 0)
-        if self._position["qty"] == 0:
-            self._position["avg_entry_price"] = 0
+        self._position["qty"] = 0
+        self._position["avg_entry_price"] = 0
         self._cash += fill_qty * fill_price
 
         # Persist to Google Sheet
-        self._append_trade(symbol, "SELL", fill_qty, fill_price, str(order.id))
+        self._append_trade(symbol, "SELL", fill_qty, fill_price, str(filled.id))
         self._save_state(held_symbol=symbol)
         logger.info(f"[{self.strategy_id}] SOLD {fill_qty:.8f} {symbol} @ ${fill_price:,.2f}")
 
-        return {"qty": fill_qty, "price": fill_price, "order_id": str(order.id)}
+        return {"qty": fill_qty, "price": fill_price, "order_id": str(filled.id)}
 
     def go_to_cash(self, symbol: str, trading_client) -> dict | None:
         """Sell entire position."""
