@@ -34,6 +34,10 @@ STRATEGIES = {
         "name": "Random Ticker 5-Min",
         "description": "Pick a random stock from top 1000, buy $100, hold 5 min, sell. Repeat.",
     },
+    "rsi2_qqq": {
+        "name": "RSI-2 QQQ $1K",
+        "description": "Buy QQQ when RSI(2) < 10, sell when > 50. Daily mean reversion.",
+    },
     "lstm_portfolio": {
         "name": "LSTM Portfolio $10K",
         "description": "LSTM allocates $10K across VTI, SCHZ, PDBC, VIXM daily. AI-driven.",

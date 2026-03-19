@@ -1,0 +1,17 @@
+[Unit]
+Description=RSI-2 QQQ Mean Reversion Strategy
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=pi
+WorkingDirectory=/home/pi/algo-trade/crypto
+ExecStart=/home/pi/algo-trade/crypto/.venv/bin/python rsi2_qqq.py
+Restart=on-failure
+RestartSec=60
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
