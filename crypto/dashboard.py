@@ -34,6 +34,10 @@ STRATEGIES = {
         "name": "Random Ticker 5-Min",
         "description": "Pick a random stock from top 1000, buy $100, hold 5 min, sell. Repeat.",
     },
+    "lstm_portfolio": {
+        "name": "LSTM Portfolio $10K",
+        "description": "LSTM allocates $10K across VTI, SCHZ, PDBC, VIXM daily. AI-driven.",
+    },
 }
 
 # --- Config ---

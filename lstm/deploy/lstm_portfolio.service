@@ -1,0 +1,17 @@
+[Unit]
+Description=LSTM Portfolio Allocation Strategy
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=pi
+WorkingDirectory=/home/pi/algo-trade/lstm
+ExecStart=/home/pi/algo-trade/lstm/.venv/bin/python lstm_deploy.py
+Restart=on-failure
+RestartSec=60
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
