@@ -1,10 +1,8 @@
 """
-Streamlit dashboard for monitoring crypto trading strategies.
+Streamlit dashboard for monitoring trading strategies.
 
 Reads performance + trade data from Google Sheets.
 Deploy on Streamlit Cloud — NOT on the Pi.
-
-To add a new strategy: just add an entry to the STRATEGIES dict below.
 """
 
 import os
@@ -18,8 +16,6 @@ from dotenv import load_dotenv
 load_dotenv()
 
 # --- Strategy registry ---
-# To add a new strategy, add an entry here. The key must match the strategy_id
-# used in portfolio.py on the Pi.
 
 STRATEGIES = {
     "rsi2_qqq": {
@@ -68,7 +64,7 @@ def get_data():
 # --- UI ---
 
 st.title("Algo Trader")
-st.caption("BTC/USD + SPY paper trading strategies — $100 budget each")
+st.caption("Algorithmic paper trading strategies")
 
 try:
     performance, trades = get_data()
@@ -78,43 +74,44 @@ except Exception as e:
 
 perf_by_id = {r["strategy_id"]: r for r in performance}
 
-strategy_list = list(STRATEGIES.items())
-COLS_PER_ROW = 3
+# Strategy cards
+for strategy_id, info in STRATEGIES.items():
+    st.subheader(info["name"])
+    st.caption(info["description"])
 
-for row_start in range(0, len(strategy_list), COLS_PER_ROW):
-    row_items = strategy_list[row_start:row_start + COLS_PER_ROW]
-    cols = st.columns(COLS_PER_ROW)
-    for i, (strategy_id, info) in enumerate(row_items):
-        with cols[i]:
-            st.subheader(info["name"])
-            st.caption(info["description"])
+    perf = perf_by_id.get(strategy_id)
+    if perf:
+        pnl = float(perf["pnl_dollar"])
+        pnl_pct = float(perf["pnl_pct"])
+        equity = float(perf["equity"])
 
-            perf = perf_by_id.get(strategy_id)
-            if perf:
-                pnl = float(perf["pnl_dollar"])
-                pnl_pct = float(perf["pnl_pct"])
-                equity = float(perf["equity"])
+        c1, c2, c3 = st.columns(3)
+        c1.metric("Equity", f"${equity:,.2f}")
+        c2.metric("P&L", f"${pnl:+,.2f}", delta=f"{pnl_pct:+.2f}%")
+        c3.metric("Last Executed", str(perf["last_updated"])[:16] + " UTC")
 
-                st.metric(
-                    "Return",
-                    f"${pnl:+.2f} ({pnl_pct:+.2f}%)",
-                    delta=f"Equity: ${equity:.2f}",
-                    delta_color="normal",
-                )
+        # Portfolio holdings (for LSTM — shows allocation from trade notes)
+        my_trades = sorted(
+            [t for t in trades if t["strategy_id"] == strategy_id],
+            key=lambda x: x["timestamp"], reverse=True,
+        )[:5]
 
-                # Compact recent trades (last 5 only)
-                my_trades = sorted(
-                    [t for t in trades if t["strategy_id"] == strategy_id],
-                    key=lambda x: x["timestamp"], reverse=True,
-                )[:5]
-                if my_trades:
-                    st.caption("Recent trades:")
-                    for t in my_trades:
-                        st.text(f"  {t['side']} {t['symbol']} @ ${float(t['price']):,.2f}")
+        if my_trades:
+            st.caption("Recent trades:")
+            for t in my_trades:
+                ts = str(t["timestamp"])[:16]
+                side = t["side"]
+                symbol = t["symbol"]
+                price = t["price"]
 
-                st.caption(f"Updated: {str(perf['last_updated'])[:16]} UTC")
-            else:
-                st.info("Waiting for data...")
+                # LSTM logs allocation as order_id field
+                if side == "REBALANCE":
+                    st.text(f"  {ts} — REBALANCE (equity ${float(price):,.2f}) — {t.get('order_id', '')}")
+                else:
+                    st.text(f"  {ts} — {side} {symbol} @ ${float(price):,.2f}")
+    else:
+        st.info("Waiting for data...")
 
-st.divider()
+    st.divider()
+
 st.caption("Auto-refreshes every 60s.")
