@@ -102,13 +102,14 @@ for strategy_id, info in STRATEGIES.items():
                 ts = str(t["timestamp"])[:16]
                 side = t["side"]
                 symbol = t["symbol"]
-                price = t["price"]
+                amount = t["price"]  # dollar amount for LSTM, price for others
 
-                # LSTM logs allocation as order_id field
                 if side == "REBALANCE":
-                    st.text(f"  {ts} — REBALANCE (equity ${float(price):,.2f}) — {t.get('order_id', '')}")
+                    st.text(f"  {ts} — REBALANCE ${float(amount):,.2f}")
+                elif strategy_id == "lstm_portfolio":
+                    st.text(f"  {ts} — {side} {symbol} ${float(amount):,.2f}")
                 else:
-                    st.text(f"  {ts} — {side} {symbol} @ ${float(price):,.2f}")
+                    st.text(f"  {ts} — {side} {symbol} @ ${float(amount):,.2f}")
     else:
         st.info("Waiting for data...")
 
