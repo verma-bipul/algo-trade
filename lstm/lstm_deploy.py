@@ -171,10 +171,9 @@ def get_weights(X):
 
 # --- Step 4: Execute orders ---
 def execute_orders(weights, current_prices):
-    """Returns list of trades executed: [{side, symbol, amount, order_id}, ...]"""
+    # Get current positions for our symbols
     all_positions = {p.symbol: float(p.market_value)
                      for p in trading_client.get_all_positions()}
-    executed = []
 
     for sym, w in zip(SYMBOLS, weights):
         target_value = round(BUDGET * float(w), 2)
@@ -194,18 +193,10 @@ def execute_orders(weights, current_prices):
         ))
         log.info(f"  {side.value.upper()} {sym} ${abs(delta):.2f} "
                  f"(${current_value:.2f} → ${target_value:.2f}) order={order.id}")
-        executed.append({
-            "side": side.value.upper(),
-            "symbol": sym,
-            "amount": round(abs(delta), 2),
-            "order_id": str(order.id),
-        })
-
-    return executed
 
 
 # --- Step 5: Log to Google Sheets ---
-def update_sheets(weights, current_prices, trades):
+def update_sheets(weights, current_prices):
     try:
         sheet = get_gsheet()
         if not sheet:
@@ -253,13 +244,10 @@ def update_sheets(weights, current_prices, trades):
         if not any(r["strategy_id"] == STRATEGY_ID for r in strat_records):
             ws_strat.append_row([STRATEGY_ID, DISPLAY_NAME, BUDGET, now])
 
-        # Trades tab — log each individual trade
+        # Trades tab — log today's allocation
         ws_trades = sheet.worksheet("trades")
-        for t in trades:
-            ws_trades.append_row([
-                now, STRATEGY_ID, t["symbol"], t["side"],
-                0, t["amount"], t["order_id"],
-            ])
+        allocation = " | ".join(f"{s}:{w*100:.0f}%" for s, w in zip(SYMBOLS, weights))
+        ws_trades.append_row([now, STRATEGY_ID, "PORTFOLIO", "REBALANCE", 0, portfolio_value, allocation])
 
         log.info(f"Sheets updated: equity=${portfolio_value:.2f} P&L=${pnl:.2f} ({pnl_pct:.2f}%)")
     except Exception as e:
@@ -274,11 +262,11 @@ def run_once():
     df, prices = fetch_data()
     X = build_features(df)
     weights = get_weights(X)
-    executed = execute_orders(weights, prices)
+    execute_orders(weights, prices)
 
     # Wait a moment for orders to fill
     time.sleep(5)
-    update_sheets(weights, prices, executed)
+    update_sheets(weights, prices)
 
     log.info("LSTM Portfolio — done")
     log.info("=" * 50)
