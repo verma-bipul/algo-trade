@@ -1,0 +1,17 @@
+[Unit]
+Description=LSTM Portfolio Strategy (90%)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=pi
+WorkingDirectory=/home/pi/Algo-Trade-UMN-Team4
+ExecStart=/home/pi/Algo-Trade-UMN-Team4/.venv/bin/python lstm_strategy.py
+Restart=on-failure
+RestartSec=60
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,17 @@
+[Unit]
+Description=Price vs 10-SMA SPY (5%)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=pi
+WorkingDirectory=/home/pi/Algo-Trade-UMN-Team4
+ExecStart=/home/pi/Algo-Trade-UMN-Team4/.venv/bin/python sma10_spy.py
+Restart=on-failure
+RestartSec=60
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
