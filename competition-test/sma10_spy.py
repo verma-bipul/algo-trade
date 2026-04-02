@@ -1,7 +1,7 @@
 """
 Price vs 10-day SMA on SPY — 5% of account equity
 
-Checks daily after market close (~4:05 PM ET):
+Checks daily after market close (~3:50 PM ET):
 - Buy when price > 10-day SMA (short-term uptrend)
 - Sell when price < 10-day SMA (uptrend broken)
 - Long-only. Typical hold: 3-7 days.
@@ -102,7 +102,7 @@ def run_loop():
     while True:
         try:
             now_et = datetime.now(timezone.utc) - timedelta(hours=4)
-            target = now_et.replace(hour=16, minute=5, second=0, microsecond=0)
+            target = now_et.replace(hour=15, minute=50, second=0, microsecond=0)
             if now_et > target:
                 target += timedelta(days=1)
             while target.weekday() >= 5:
