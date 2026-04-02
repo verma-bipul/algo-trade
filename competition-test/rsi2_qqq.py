@@ -129,7 +129,7 @@ def run_loop():
     while True:
         try:
             now_et = datetime.now(timezone.utc) - timedelta(hours=4)
-            target = now_et.replace(hour=15, minute=50, second=0, microsecond=0)
+            target = now_et.replace(hour=12, minute=5, second=0, microsecond=0)
             if now_et > target:
                 target += timedelta(days=1)
             while target.weekday() >= 5:
